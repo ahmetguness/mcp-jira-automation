@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  runner:
+    build:
+      context: .
+    env_file:
+      - .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
