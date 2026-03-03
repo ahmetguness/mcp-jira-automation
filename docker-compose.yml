@@ -1,10 +1,34 @@
 version: "3.8"
 
 services:
+  # mcp-atlassian (Jira + Confluence MCP server)
+  mcp-atlassian:
+    image: ghcr.io/sooperset/mcp-atlassian:latest
+    command: --transport sse --port 9000 -vv
+    ports:
+      - "9000:9000"
+    env_file:
+      - .env
+    environment:
+      - JIRA_URL=${JIRA_BASE_URL}
+      - JIRA_USERNAME=${JIRA_EMAIL}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+    restart: unless-stopped
+
+  # AI Cyber Bot runner
   runner:
     build:
       context: .
     env_file:
       - .env
+    environment:
+      - MCP_SSE_URL=http://mcp-atlassian:9000/sse
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - runner-data:/app/data
+    depends_on:
+      - mcp-atlassian
+    restart: unless-stopped
+
+volumes:
+  runner-data:

@@ -1,29 +1,27 @@
-import { connectMcp } from "./mcp/client.js";
+/**
+ * Entry point — loads config and starts the app.
+ */
 
+import "dotenv/config";
+import { loadConfig } from "./config.js";
+import { App } from "./app.js";
+import { createLogger } from "./logger.js";
 
-async function main() {
-    console.log("MCP Jira Automation Runner started");
-    console.log(`Jira URL: ${process.env.JIRA_BASE_URL || "(not set)"}`);
-    console.log("mcp-jira-automation runner is up ✅");
+const log = createLogger("main");
 
-    const client = await connectMcp();
-    const { tools } = await client.listTools();
-
-    console.log("MCP tool count:", tools.length);
-    console.log("First tools:", tools.slice(0, 15).map((t) => t.name));
-
-    const result = await client.callTool({
-        name: "jira_search",
-        arguments: {
-            jql: "ORDER BY created DESC",
-            max_results: 5,
-        },
-    });
-
-    console.log("Last 5 issues:", JSON.stringify(result, null, 2));
-
-    await client.close();
+async function main(): Promise<void> {
+    try {
+        const config = loadConfig();
+        const app = new App(config);
+        await app.start();
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        log.error(`Fatal error: ${msg}`);
+        if (e instanceof Error && e.stack) {
+            log.error(e.stack);
+        }
+        process.exit(1);
+    }
 }
 
-main().catch(console.error);
-
+main();

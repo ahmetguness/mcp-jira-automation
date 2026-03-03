@@ -1,23 +1,36 @@
 {
   "name": "mcp-jira-automation",
   "version": "1.0.0",
-  "description": "Repository: https://github.com/ORG/REPO\r Ref: main\r Working Directory: backend",
-  "main": "index.js",
+  "description": "AI-powered Jira automation bot — polls for tasks, reads code from SCM, analyzes with AI, tests in Docker, reports back to Jira",
+  "main": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js"
   },
-  "keywords": [],
+  "keywords": [
+    "jira",
+    "mcp",
+    "ai",
+    "automation",
+    "devops"
+  ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "devDependencies": {
+    "@types/dockerode": "^4.0.1",
     "@types/node": "^25.3.3",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@google/generative-ai": "^0.24.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "dockerode": "^4.0.9",
+    "dotenv": "^17.3.1",
+    "openai": "^6.25.0",
+    "zod": "^4.3.6"
   }
 }
