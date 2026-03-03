@@ -3,7 +3,8 @@
  */
 
 import type { ScmProvider } from "./provider.js";
-import type { ScmFile, RepoInfo, BitbucketRawSearchResponse, BitbucketRawFile, BitbucketRawPullRequest, BitbucketRawRepo } from "../types.js";
+import type { ScmFile, RepoInfo } from "../types.js";
+import { parseBitbucketSearchResponse, parseBitbucketFile, parseBitbucketPullRequest } from "../validation/scm.js";
 import type { McpManager } from "../mcp/manager.js";
 import type { Config } from "../config.js";
 import { createLogger } from "../logger.js";
@@ -23,13 +24,14 @@ export class BitbucketProvider implements ScmProvider {
     async getRepoInfo(repo: string): Promise<RepoInfo> {
         const { workspace, slug } = this.parseRepo(repo);
         // mcp-bitbucket doesn't have a direct "get repo" tool, use search
-        const result = (await this.mcp.callScmTool("bb_search_repositories", {
+        const rawResult = await this.mcp.callScmTool("bb_search_repositories", {
             query: `name = "${slug}"`,
             workspace,
             pagelen: 1,
-        })) as BitbucketRawSearchResponse;
+        });
+        const result = parseBitbucketSearchResponse(rawResult);
 
-        const first = result?.values?.[0] as BitbucketRawRepo | undefined;
+        const first = result?.values?.[0];
         return {
             name: `${workspace}/${slug}`,
             defaultBranch: first?.mainbranch?.name ?? "main",
@@ -46,13 +48,15 @@ export class BitbucketProvider implements ScmProvider {
         };
         if (branch) args.branch = branch;
 
-        const result = (await this.mcp.callScmTool("bb_read_file", args)) as BitbucketRawFile | string;
+        const rawResult = await this.mcp.callScmTool("bb_read_file", args);
+        const result = parseBitbucketFile(rawResult);
         if (typeof result === "string") return result;
         if (result?.content) return result.content;
         return JSON.stringify(result);
     }
 
-    async listFiles(repo: string, path?: string, _branch?: string): Promise<string[]> {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    async listFiles(_repo: string, _path?: string, _branch?: string): Promise<string[]> {
         // mcp-bitbucket doesn't have a tree listing tool, return empty
         log.warn("Bitbucket MCP does not support listing files. Use readFile with known paths.");
         return [];
@@ -65,7 +69,7 @@ export class BitbucketProvider implements ScmProvider {
                 const content = await this.readFile(repo, p, branch);
                 files.push({ path: p, content });
             } catch (e) {
-                log.warn(`Failed to read ${repo}/${p}: ${e}`);
+                log.warn(`Failed to read ${repo}/${p}: ${String(e)}`);
             }
         }
         return files;
@@ -102,14 +106,15 @@ export class BitbucketProvider implements ScmProvider {
         targetBranch?: string,
     ): Promise<string> {
         const { workspace, slug } = this.parseRepo(repo);
-        const result = (await this.mcp.callScmTool("bb_create_pull_request", {
+        const rawResult = await this.mcp.callScmTool("bb_create_pull_request", {
             repo_slug: slug,
             title,
             description: body,
             source_branch: sourceBranch,
             destination_branch: targetBranch ?? "main",
             workspace,
-        })) as BitbucketRawPullRequest;
+        });
+        const result = parseBitbucketPullRequest(rawResult);
 
         const prUrl = result?.links?.html?.href ?? result?.url ?? "";
         log.info(`Created PR: ${prUrl}`);

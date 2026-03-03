@@ -20,7 +20,7 @@ export function createAiProvider(config: Config): AiProvider {
         case "vllm":
             return new VllmProvider(config);
         default:
-            throw new Error(`Unknown AI provider: ${config.aiProvider}`);
+            throw new Error(`Unsupported AI Provider: ${String(config.aiProvider)}`);
     }
 }
 

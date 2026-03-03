@@ -59,7 +59,7 @@ export async function buildTaskContext(
     try {
         allFiles = await scm.listFiles(repo, undefined, branch);
     } catch (e) {
-        log.warn(`Could not list files: ${e}. Will try to read known file patterns.`);
+        log.warn(`Failed to fetch test files: ${String(e)}. Will try to read known file patterns.`);
     }
 
     // Categorize files

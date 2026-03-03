@@ -3,7 +3,8 @@
  */
 
 import type { ScmProvider } from "./provider.js";
-import type { ScmFile, RepoInfo, GitLabRawProject, GitLabRawFile, GitLabRawMergeRequest } from "../types.js";
+import type { ScmFile, RepoInfo } from "../types.js";
+import { parseGitLabProject, parseGitLabFile, parseGitLabFileList, parseGitLabMergeRequest } from "../validation/scm.js";
 import type { McpManager } from "../mcp/manager.js";
 import { createLogger } from "../logger.js";
 
@@ -14,9 +15,10 @@ export class GitLabProvider implements ScmProvider {
 
     async getRepoInfo(repo: string): Promise<RepoInfo> {
         const projectPath = encodeURIComponent(repo);
-        const result = (await this.mcp.callScmTool("get_project", {
+        const rawResult = await this.mcp.callScmTool("get_project", {
             project_id: projectPath,
-        })) as GitLabRawProject;
+        });
+        const result = parseGitLabProject(rawResult);
 
         return {
             name: result?.path_with_namespace ?? repo,
@@ -33,7 +35,8 @@ export class GitLabProvider implements ScmProvider {
         };
         if (branch) args.ref = branch;
 
-        const result = (await this.mcp.callScmTool("get_file_contents", args)) as GitLabRawFile | string;
+        const rawResult = await this.mcp.callScmTool("get_file_contents", args);
+        const result = parseGitLabFile(rawResult);
         if (typeof result === "string") return result;
         if (result?.content) {
             if (result.encoding === "base64") {
@@ -52,11 +55,13 @@ export class GitLabProvider implements ScmProvider {
         };
         if (branch) args.ref = branch;
 
-        const result = (await this.mcp.callScmTool("list_repository_tree", args)) as GitLabRawFile[];
-        if (Array.isArray(result)) {
+        const rawResult = await this.mcp.callScmTool("list_repository_tree", args);
+        try {
+            const result = parseGitLabFileList(rawResult);
             return result.filter((f) => f.type === "blob").map((f) => f.path ?? f.name ?? "");
+        } catch {
+            return [];
         }
-        return [];
     }
 
     async readFiles(repo: string, paths: string[], branch?: string): Promise<ScmFile[]> {
@@ -66,7 +71,7 @@ export class GitLabProvider implements ScmProvider {
                 const content = await this.readFile(repo, p, branch);
                 files.push({ path: p, content });
             } catch (e) {
-                log.warn(`Failed to read ${repo}/${p}: ${e}`);
+                log.warn(`Failed to read ${repo}/${p}: ${String(e)}`);
             }
         }
         return files;
@@ -101,13 +106,14 @@ export class GitLabProvider implements ScmProvider {
         targetBranch?: string,
     ): Promise<string> {
         const projectPath = encodeURIComponent(repo);
-        const result = (await this.mcp.callScmTool("create_merge_request", {
+        const rawResult = await this.mcp.callScmTool("create_merge_request", {
             project_id: projectPath,
             title,
             description: body,
             source_branch: sourceBranch,
             target_branch: targetBranch ?? "main",
-        })) as GitLabRawMergeRequest;
+        });
+        const result = parseGitLabMergeRequest(rawResult);
 
         const prUrl = result?.web_url ?? result?.url ?? "";
         log.info(`Created MR: ${prUrl}`);

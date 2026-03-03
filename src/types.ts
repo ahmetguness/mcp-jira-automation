@@ -102,17 +102,17 @@ export interface JiraRawIssue {
     key?: string;
     issue_key?: string;
     summary?: string;
-    description?: string;
-    status?: { name?: string };
-    issue_type?: { name?: string };
-    issuetype?: { name?: string };
-    assignee?: { display_name?: string; name?: string; displayName?: string };
+    description?: string | null;
+    status?: { name?: string } | null;
+    issue_type?: { name?: string } | null;
+    issuetype?: { name?: string } | null;
+    assignee?: { display_name?: string; name?: string; displayName?: string } | null;
     fields?: {
         summary?: string;
-        description?: string;
-        status?: { name?: string };
-        issuetype?: { name?: string };
-        assignee?: { display_name?: string; name?: string; displayName?: string };
+        description?: string | null;
+        status?: { name?: string } | null;
+        issuetype?: { name?: string } | null;
+        assignee?: { display_name?: string; name?: string; displayName?: string } | null;
         [key: string]: unknown;
     };
     [key: string]: unknown;

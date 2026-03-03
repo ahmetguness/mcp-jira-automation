@@ -28,7 +28,7 @@ export class StateStore {
         try {
             if (existsSync(this.filePath)) {
                 const raw = readFileSync(this.filePath, "utf-8");
-                return JSON.parse(raw) as StateData;
+                return JSON.parse(raw);
             }
         } catch (e: unknown) {
             log.warn(`Failed to load state file, starting fresh: ${String(e)}`);
@@ -93,7 +93,7 @@ export class StateStore {
             lockedAt: new Date().toISOString(),
         };
         this.save();
-        log.info(`Locked issue ${issueKey} for processing (attempt ${this.data.issues[issueKey]!.attemptCount})`);
+        log.info(`Locked issue ${issueKey} for processing (attempt ${this.data.issues[issueKey]?.attemptCount})`);
         return true;
     }
 

@@ -234,7 +234,7 @@ export class PipelineHandler {
             log.info(`PR created: ${prUrl}`);
             return prUrl;
         } catch (e: unknown) {
-            log.error(`Failed to create PR: ${e}`);
+            log.error(`Failed to create PR: ${String(e)}`);
             throw e;
         }
     }

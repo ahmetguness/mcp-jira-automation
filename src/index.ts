@@ -24,4 +24,7 @@ async function main(): Promise<void> {
     }
 }
 
-main();
+main().catch((e) => {
+    console.error("Fatal initialization error:", e);
+    process.exit(1);
+});

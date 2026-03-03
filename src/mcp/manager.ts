@@ -5,6 +5,7 @@
 import type { Config } from "../config.js";
 import { createLogger } from "../logger.js";
 import { connectJiraMcp, connectScmMcp, type McpConnection } from "./spawn.js";
+import { extractMcpToolResultText } from "../validation/mcp.js";
 
 const log = createLogger("mcp:manager");
 
@@ -46,18 +47,8 @@ export class McpManager {
         log.debug(`Calling ${connection.name}/${name}`, args);
         const result = await connection.client.callTool({ name, arguments: args });
 
-        // Extract text content from MCP response
-        let text: unknown;
-        if (typeof result === "object" && result !== null) {
-            const res = result as Record<string, unknown>;
-
-            const structuredContent = res.structuredContent as Record<string, unknown> | undefined;
-            const contentArray = res.content as Array<Record<string, unknown>> | undefined;
-
-            text = structuredContent?.result ?? contentArray?.[0]?.text ?? JSON.stringify(result);
-        } else {
-            text = JSON.stringify(result);
-        }
+        // Extract text content safely via Zod validator
+        const text = extractMcpToolResultText(result);
 
         try {
             return JSON.parse(typeof text === "string" ? text : JSON.stringify(text));
@@ -82,11 +73,11 @@ export class McpManager {
         const tasks: Promise<void>[] = [];
 
         if (this.jira) {
-            tasks.push(this.jira.client.close().catch((e: unknown) => log.warn(`Error closing Jira MCP: ${e}`)));
+            tasks.push(this.jira.client.close().catch((e) => log.warn(`Error closing Jira MCP: ${String(e)}`)));
             this.jira = null;
         }
         if (this.scm) {
-            tasks.push(this.scm.client.close().catch((e: unknown) => log.warn(`Error closing SCM MCP: ${e}`)));
+            tasks.push(this.scm.client.close().catch((e) => log.warn(`Error closing SCM MCP: ${String(e)}`)));
             this.scm = null;
         }
 

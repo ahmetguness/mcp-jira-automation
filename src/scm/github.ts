@@ -3,7 +3,8 @@
  */
 
 import type { ScmProvider } from "./provider.js";
-import type { ScmFile, RepoInfo, GitHubRawRepo, GitHubRawFile, GitHubRawPullRequest } from "../types.js";
+import type { ScmFile, RepoInfo } from "../types.js";
+import { parseGitHubFile, parseGitHubFileList, parseGitHubPullRequest } from "../validation/scm.js";
 import type { McpManager } from "../mcp/manager.js";
 import { createLogger } from "../logger.js";
 
@@ -14,11 +15,13 @@ export class GitHubProvider implements ScmProvider {
 
     async getRepoInfo(repo: string): Promise<RepoInfo> {
         const [owner, name] = this.parseRepo(repo);
-        const result = (await this.mcp.callScmTool("get_repository", { owner, repo: name })) as GitHubRawRepo;
+
+        // Repo doğrulamasını MCP ile yapmıyoruz.
+        // Çünkü bazı GitHub MCP server’larda "get_repository" tool’u yok.
+        // Repo yoksa zaten clone/fetch aşaması patlayacak.
         return {
-            name: result?.full_name ?? repo,
-            defaultBranch: result?.default_branch ?? "main",
-            description: result?.description ?? "",
+            name: repo,
+            defaultBranch: "main",
         };
     }
 
@@ -27,7 +30,8 @@ export class GitHubProvider implements ScmProvider {
         const args: Record<string, unknown> = { owner, repo: name, path };
         if (branch) args.branch = branch;
 
-        const result = (await this.mcp.callScmTool("get_file_contents", args)) as GitHubRawFile | string;
+        const rawResult = await this.mcp.callScmTool("get_file_contents", args);
+        const result = parseGitHubFile(rawResult);
         // github-mcp-server may return content directly or base64
         if (typeof result === "string") return result;
         if (result?.content) {
@@ -43,11 +47,13 @@ export class GitHubProvider implements ScmProvider {
         const [owner, name] = this.parseRepo(repo);
         const args: Record<string, unknown> = { owner, repo: name, path: path ?? "" };
 
-        const result = (await this.mcp.callScmTool("get_file_contents", args)) as GitHubRawFile[];
-        if (Array.isArray(result)) {
-            return result.map((f) => f.path ?? f.name ?? String(f));
+        const rawResult = await this.mcp.callScmTool("get_file_contents", args);
+        try {
+            const result = parseGitHubFileList(rawResult);
+            return result.map((f) => f.path ?? f.name ?? (typeof f === "string" ? f : ""));
+        } catch {
+            return [];
         }
-        return [];
     }
 
     async readFiles(repo: string, paths: string[], branch?: string): Promise<ScmFile[]> {
@@ -57,7 +63,7 @@ export class GitHubProvider implements ScmProvider {
                 const content = await this.readFile(repo, p, branch);
                 files.push({ path: p, content });
             } catch (e) {
-                log.warn(`Failed to read ${repo}/${p}: ${e}`);
+                log.warn(`Failed to read ${repo}/${p}: ${String(e)}`);
             }
         }
         return files;
@@ -68,12 +74,12 @@ export class GitHubProvider implements ScmProvider {
         const base = baseBranch ?? "main";
 
         // Get the SHA of the base branch
-        const refResult = (await this.mcp.callScmTool("get_file_contents", {
+        await this.mcp.callScmTool("get_file_contents", {
             owner,
             repo: name,
             path: "",
             branch: base,
-        })) as GitHubRawFile[];
+        });
 
         await this.mcp.callScmTool("create_branch", {
             owner,
@@ -105,14 +111,15 @@ export class GitHubProvider implements ScmProvider {
         targetBranch?: string,
     ): Promise<string> {
         const [owner, name] = this.parseRepo(repo);
-        const result = (await this.mcp.callScmTool("create_pull_request", {
+        const rawResult = await this.mcp.callScmTool("create_pull_request", {
             owner,
             repo: name,
             title,
             body,
             head: sourceBranch,
             base: targetBranch ?? "main",
-        })) as GitHubRawPullRequest;
+        });
+        const result = parseGitHubPullRequest(rawResult);
 
         const prUrl = result?.html_url ?? result?.url ?? "";
         log.info(`Created PR: ${prUrl}`);

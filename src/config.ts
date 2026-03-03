@@ -106,7 +106,7 @@ export function loadConfig(): Config {
         mcpAtlassianUrl: process.env.MCP_SSE_URL ?? "http://127.0.0.1:9000/sse",
 
         // PR
-        requireApproval: process.env.REQUIRE_APPROVAL ?? "false",
+        requireApproval: (process.env.REQUIRE_APPROVAL ?? "false").toLowerCase() === "true",
 
         // Logging
         logLevel: process.env.LOG_LEVEL ?? "info",

@@ -4,8 +4,9 @@
 
 import type { Config } from "../config.js";
 import { buildBotJql } from "../config.js";
+import { parseJiraIssue, parseJiraSearchResponse } from "../validation/jira.js";
 import type { McpManager } from "../mcp/manager.js";
-import type { JiraIssue, JiraRawSearchResponse, JiraRawIssue } from "../types.js";
+import type { JiraIssue } from "../types.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("jira:client");
@@ -21,11 +22,13 @@ export class JiraClient {
         const jql = buildBotJql(this.config);
         log.info(`Fetching bot issues with JQL: ${jql}`);
 
-        const result = (await this.mcp.callJiraTool("jira_search", {
+        const rawResult = await this.mcp.callJiraTool("jira_search", {
             jql,
             limit,
             fields: "summary,status,description,issuetype,assignee",
-        })) as JiraRawSearchResponse;
+        });
+
+        const result = parseJiraSearchResponse(rawResult);
 
         const issues = result?.issues ?? result?.result?.issues ?? [];
         return issues.map((i) => this.parseIssue(i));
@@ -34,9 +37,11 @@ export class JiraClient {
     /** Get a single issue by key */
     async getIssue(issueKey: string): Promise<JiraIssue> {
         log.debug(`Getting issue ${issueKey}`);
-        const result = (await this.mcp.callJiraTool("jira_get_issue", {
+        const rawResult = await this.mcp.callJiraTool("jira_get_issue", {
             issue_key: issueKey,
-        })) as JiraRawIssue;
+        });
+
+        const result = parseJiraIssue(rawResult);
 
         return this.parseIssue(result);
     }
@@ -46,9 +51,10 @@ export class JiraClient {
         const fieldId = this.config.jiraRepoFieldId;
 
         if (fieldId) {
-            const result = (await this.mcp.callJiraTool("jira_get_issue", {
+            const rawResult = await this.mcp.callJiraTool("jira_get_issue", {
                 issue_key: issueKey,
-            })) as JiraRawIssue;
+            });
+            const result = parseJiraIssue(rawResult);
 
             const value =
                 result?.fields?.[fieldId] ??
@@ -56,7 +62,7 @@ export class JiraClient {
                 null;
 
             if (value) {
-                return normalizeRepoUrl(String(value));
+                return normalizeRepoUrl(typeof value === "string" ? value : JSON.stringify(value));
             }
         }
 
@@ -87,7 +93,7 @@ export class JiraClient {
                 target_status: targetStatus,
             });
         } catch (e) {
-            log.warn(`Failed to transition ${issueKey}: ${e}`);
+            log.warn(`Failed to transition ${issueKey}: ${String(e)}`);
         }
     }
 
@@ -99,7 +105,8 @@ export class JiraClient {
         });
     }
 
-    private parseIssue(raw: JiraRawIssue): JiraIssue {
+    private parseIssue(rawUnsafe: unknown): JiraIssue {
+        const raw = parseJiraIssue(rawUnsafe);
         return {
             key: raw.key ?? raw.issue_key ?? "?",
             summary: raw.summary ?? raw.fields?.summary ?? "",
@@ -146,7 +153,9 @@ function parseRepoFromDescription(description: string): string | null {
 
     // Match patterns like "Repo: org/repo" or "Repository: https://github.com/org/repo"
     const patterns = [
-        /(?:repo(?:sitory)?)\s*[:=]\s*(.+)/i,
+        /Repo:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i,
+        /Repository:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i,
+        /(?:Repo|Repository):\s*(https?:\/\/[^\s]+)/i,
         /(?:github|gitlab|bitbucket)\.(?:com|org)\/([^\s]+)/i,
     ];
 

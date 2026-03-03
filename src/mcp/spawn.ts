@@ -93,6 +93,6 @@ function getScmSpawnConfig(config: Config): SpawnConfig {
             };
 
         default:
-            throw new Error(`Unknown SCM provider: ${config.scmProvider}`);
+            throw new Error(`Unsupported SCM Provider: ${String(config.scmProvider)}`);
     }
 }

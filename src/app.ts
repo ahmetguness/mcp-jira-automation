@@ -86,8 +86,13 @@ export class App {
 
     private setupShutdownHandlers(): void {
         const shutdown = async () => {
-            await this.stop();
-            process.exit(0);
+            try {
+                await this.stop();
+                process.exit(0);
+            } catch (e) {
+                log.error(`Application crashed during shutdown: ${String(e)}`);
+                process.exit(1);
+            }
         };
 
         process.on("SIGINT", () => void shutdown());
@@ -100,7 +105,7 @@ export class App {
         });
 
         process.on("unhandledRejection", (reason) => {
-            log.error(`Unhandled rejection: ${reason}`);
+            log.error(`Unhandled rejection: ${String(reason)}`);
         });
     }
 }

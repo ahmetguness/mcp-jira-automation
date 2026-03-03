@@ -18,7 +18,7 @@ export function createScmProvider(config: Config, mcp: McpManager): ScmProvider 
         case "bitbucket":
             return new BitbucketProvider(mcp, config);
         default:
-            throw new Error(`Unknown SCM provider: ${config.scmProvider}`);
+            throw new Error(`Unsupported SCM Provider: ${String(config.scmProvider)}`);
     }
 }
 

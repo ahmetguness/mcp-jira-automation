@@ -51,11 +51,11 @@ export class JiraPoller {
                 try {
                     await handler(issue);
                 } catch (e) {
-                    log.error(`Error handling issue ${issue.key}: ${e}`);
+                    log.error(`Failed to handle issue ${issue.key}: ${String(e)}`);
                 }
             }
         } catch (e) {
-            log.error(`Polling error: ${e}`);
+            log.error(`Jira poll failed: ${String(e)}`);
         }
 
         if (this.running) {

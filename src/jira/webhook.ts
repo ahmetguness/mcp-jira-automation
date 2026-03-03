@@ -80,7 +80,7 @@ export class JiraWebhook {
             // Process async
             handler(issue).catch((e) => log.error(`Error handling webhook issue ${issueKey}: ${e}`));
         } catch (e) {
-            log.error(`Webhook error: ${e}`);
+            log.error(`Failed to process webhook: ${String(e)}`);
             res.writeHead(500);
             res.end("Internal Server Error");
         }
