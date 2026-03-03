@@ -106,7 +106,7 @@ export async function buildTaskContext(
 }
 
 /** Extract file paths mentioned in the issue description */
-function extractMentionedFiles(description: string, allFiles: string[]): string[] {
+export function extractMentionedFiles(description: string, allFiles: string[]): string[] {
     if (!description) return [];
 
     const mentioned: string[] = [];
