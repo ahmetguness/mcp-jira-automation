@@ -55,7 +55,16 @@ export class StateStore {
         if (!state) return true;
 
         // Already succeeded -> skip
-        if (state.status === "success") return false;
+        if (state.status === "success" || state.status === "permanently_failed") return false;
+
+        // Skip if currently in backoff cooldown
+        if (state.nextRetryAt) {
+            const retryTime = new Date(state.nextRetryAt).getTime();
+            if (Date.now() < retryTime) {
+                log.debug(`Issue ${issueKey} is in cooldown, skipping until ${state.nextRetryAt}`);
+                return false;
+            }
+        }
 
         // Currently locked by another run
         if (state.lockedAt) {
@@ -91,6 +100,7 @@ export class StateStore {
             prUrl: existing?.prUrl ?? null,
             errorMessage: null,
             lockedAt: new Date().toISOString(),
+            nextRetryAt: existing?.nextRetryAt ?? null,
         };
         this.save();
         log.info(`Locked issue ${issueKey} for processing (attempt ${this.data.issues[issueKey]?.attemptCount})`);

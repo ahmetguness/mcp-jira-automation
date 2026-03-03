@@ -9,6 +9,62 @@ import { extractMcpToolResultText } from "../validation/mcp.js";
 
 const log = createLogger("mcp:manager");
 
+/**
+ * Unwraps common MCP tool return shapes into a usable JS value.
+ * Handles:
+ * - structuredContent.result
+ * - content[0].text as JSON (or plain text)
+ * - raw JSON string
+ */
+function unwrapMcpResult(raw: unknown): unknown {
+    // Case 1: Raw is already an object we can inspect
+    if (raw && typeof raw === "object") {
+        const anyRaw = raw as any;
+
+        const structured = anyRaw.structuredContent?.result;
+        if (structured !== undefined) return structured;
+
+        const text = anyRaw.content?.[0]?.text;
+        if (typeof text === "string") {
+            const trimmed = text.trim();
+
+            // Try JSON parse if it looks like JSON
+            if (
+                (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+                (trimmed.startsWith("[") && trimmed.endsWith("]"))
+            ) {
+                try {
+                    return JSON.parse(trimmed);
+                } catch {
+                    // fallthrough to return plain text
+                }
+            }
+
+            return trimmed;
+        }
+    }
+
+    // Case 2: Raw is a string (sometimes already JSON)
+    if (typeof raw === "string") {
+        const trimmed = raw.trim();
+
+        if (
+            (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+            (trimmed.startsWith("[") && trimmed.endsWith("]"))
+        ) {
+            try {
+                return JSON.parse(trimmed);
+            } catch {
+                return trimmed;
+            }
+        }
+
+        return trimmed;
+    }
+
+    return raw;
+}
+
 export class McpManager {
     private jira: McpConnection | null = null;
     private scm: McpConnection | null = null;
@@ -45,16 +101,17 @@ export class McpManager {
     /** Call a tool on a specific MCP server */
     async callTool(connection: McpConnection, name: string, args: Record<string, unknown>): Promise<unknown> {
         log.debug(`Calling ${connection.name}/${name}`, args);
+
         const result = await connection.client.callTool({ name, arguments: args });
 
-        // Extract text content safely via Zod validator
-        const text = extractMcpToolResultText(result);
+        // Extract text content safely via Zod validator (may be string or structured)
+        const extracted = extractMcpToolResultText(result);
 
-        try {
-            return JSON.parse(typeof text === "string" ? text : JSON.stringify(text));
-        } catch {
-            return text;
-        }
+        // Normalize to a JS value:
+        // - If extracted is a JSON string, parse it
+        // - If it's already structured, keep it
+        // - If it's plain text, return it
+        return unwrapMcpResult(extracted);
     }
 
     /** Call a Jira tool */

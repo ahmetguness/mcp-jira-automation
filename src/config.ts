@@ -44,7 +44,7 @@ const configSchema = z.object({
     // Executor
     execPolicy: z.enum(["strict", "permissive"]).default("strict"),
     execTimeoutMs: z.coerce.number().int().default(300_000), // 5 min
-    dockerImage: z.string().default("node:20-slim"),
+    dockerImage: z.string().default("node:20-bookworm"),
 
     // MCP server paths
     mcpAtlassianUrl: z.string().default("http://127.0.0.1:9000/sse"),
@@ -57,6 +57,7 @@ const configSchema = z.object({
 
     // State
     stateFile: z.string().default("./data/state.json"),
+    maxAttempts: z.coerce.number().int().default(3),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -113,6 +114,7 @@ export function loadConfig(): Config {
 
         // State
         stateFile: process.env.STATE_FILE ?? "./data/state.json",
+        maxAttempts: process.env.MAX_ATTEMPTS ?? "3",
     };
 
     const result = configSchema.safeParse(raw);
@@ -131,5 +133,5 @@ export function loadConfig(): Config {
 /** Build the JQL query for fetching bot-assigned issues */
 export function buildBotJql(config: Config): string {
     if (config.jqlOverride) return config.jqlOverride;
-    return `assignee = "${config.jiraBotDisplayName}" AND statusCategory != Done ORDER BY created DESC`;
+    return `assignee = "${config.jiraBotDisplayName}" AND statusCategory != Done AND (labels IS EMPTY OR labels != "ai-failed") ORDER BY created DESC`;
 }

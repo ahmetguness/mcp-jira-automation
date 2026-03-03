@@ -72,7 +72,7 @@ export interface ExecutionResult {
 
 // ─── State ───────────────────────────────────────────────────
 
-export type IssueStatus = "pending" | "processing" | "success" | "failed" | "approval_pending";
+export type IssueStatus = "pending" | "processing" | "success" | "failed" | "approval_pending" | "permanently_failed";
 
 export interface IssueState {
     issueKey: string;
@@ -82,6 +82,7 @@ export interface IssueState {
     prUrl: string | null;
     errorMessage: string | null;
     lockedAt: string | null;
+    nextRetryAt: string | null;
 }
 
 // ─── Pipeline Result ─────────────────────────────────────────

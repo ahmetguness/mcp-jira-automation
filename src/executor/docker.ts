@@ -93,8 +93,9 @@ export class DockerExecutor {
             container = await this.docker.createContainer({
                 Image: this.image,
                 name: containerName,
-                Cmd: ["sh", "-c", fullScript],
+                Cmd: ["sh", "-lc", fullScript],
                 WorkingDir: "/workspace",
+                Tty: true,
                 HostConfig: {
                     // Security: no network needed for tests in most cases
                     // But we need it for git clone and npm install
@@ -126,18 +127,20 @@ export class DockerExecutor {
 
             // Collect logs
             const logStream = await container.logs({ stdout: true, stderr: true, follow: false });
+            // Since Tty is true, stdout and stderr are not multiplexed
             const output = logStream.toString("utf-8");
 
-            // Split stdout/stderr (Docker multiplexes them)
-            const stdout = output;
-            const stderr = "";
+            const exitCode = waitResult.StatusCode;
+            log.info(`Container ${containerName} finished (exit: ${exitCode})`);
 
-            log.info(`Container ${containerName} finished (exit: ${waitResult.StatusCode})`);
+            if (exitCode !== 0) {
+                log.error(`Docker execution failed (exit ${exitCode}).\n--- Output ---\n${output}\n--------------`);
+            }
 
             return {
-                exitCode: waitResult.StatusCode,
-                stdout: stdout.slice(0, 50000), // Limit output size
-                stderr: stderr.slice(0, 50000),
+                exitCode: exitCode,
+                stdout: output.slice(0, 50000), // Limit output size
+                stderr: "",
             };
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
