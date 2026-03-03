@@ -1,62 +1,152 @@
 /**
- * Structured logger with duration tracking for each pipeline step.
+ * Pino-backed structured logger.
  */
+
+import { pino } from "pino";
+import crypto from "node:crypto";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-interface LogEntry {
-    timestamp: string;
-    level: LogLevel;
-    component: string;
+export interface LogContext {
+    runId?: string;
+    issueKey?: string;
+    step?: string;
+    provider?: string;
+}
+
+let globalContext: LogContext = {};
+
+export function setLogContext(ctx: Partial<LogContext>): void {
+    globalContext = { ...globalContext, ...ctx };
+}
+
+export function getLogContext(): LogContext {
+    return globalContext;
+}
+
+export interface NormalizedError {
     message: string;
-    duration_ms?: number;
+    severity: LogLevel;
+    actionHint?: string;
+    prExistsFlag?: boolean;
     data?: Record<string, unknown>;
 }
 
-const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+export function normalizeError(err: unknown): NormalizedError {
+    const msg = err instanceof Error ? err.message : String(err);
 
-let globalLevel: LogLevel = (process.env.LOG_LEVEL as LogLevel) ?? "info";
-
-export function setLogLevel(level: LogLevel): void {
-    globalLevel = level;
-}
-
-function formatEntry(e: LogEntry): string {
-    const lvl = e.level.toUpperCase().padEnd(5);
-    const dur = e.duration_ms != null ? ` (${e.duration_ms}ms)` : "";
-    const extra = e.data ? ` ${JSON.stringify(e.data)}` : "";
-    return `${e.timestamp} [${lvl}] [${e.component}] ${e.message}${dur}${extra}`;
-}
-
-export function createLogger(component: string) {
-    function log(level: LogLevel, message: string, data?: Record<string, unknown>, duration_ms?: number) {
-        if (LEVEL_ORDER[level] < LEVEL_ORDER[globalLevel]) return;
-        const entry: LogEntry = {
-            timestamp: new Date().toISOString(),
-            level,
-            component,
-            message,
-            duration_ms,
-            data,
+    // Detect GitHub 422 PR exists
+    if (
+        (msg.includes("Validation Failed") || msg.includes("422")) &&
+        (msg.includes("pull_request") || msg.includes("A pull request already exists"))
+    ) {
+        return {
+            severity: "warn",
+            message: "PR already exists",
+            actionHint: "Open existing PR or reuse branch; do not retry PR creation",
+            prExistsFlag: true,
+            data: { http: 422, originalMessage: msg }
         };
-        const line = formatEntry(entry);
-        if (level === "error") {
-            console.error(line);
-        } else if (level === "warn") {
-            console.warn(line);
-        } else {
-            console.log(line);
+    }
+
+    // Detect missing repo field
+    if (msg.includes("No repository found on issue")) {
+        return {
+            severity: "warn",
+            message: "Missing Repository field",
+            actionHint: "Set Repository custom field on Jira issue",
+            data: { originalMessage: msg }
+        };
+    }
+
+    // Detect MCP disconnect
+    if (msg.includes("Connection closed") || msg.includes("disconnect") || msg.includes("read ECONNRESET")) {
+        return {
+            severity: "error",
+            message: "MCP disconnected",
+            actionHint: "Check if the MCP server crashed or network dropped",
+            data: { originalMessage: msg }
+        };
+    }
+
+    return {
+        severity: "error",
+        message: msg,
+    };
+}
+
+// Generate unique ID per app session
+const RUN_ID = crypto.randomUUID();
+
+// Configure transport (JSON vs human-readable DEV)
+const isJsonMode = process.env.LOG_FORMAT === "json" || process.env.NODE_ENV === "production";
+
+const transportOptions = isJsonMode
+    ? undefined
+    : {
+        target: "pino-pretty",
+        options: {
+            colorize: true,
+            translateTime: "SYS:standard",
+            ignore: "pid,hostname,runId",
+            singleLine: true,
+        },
+    };
+
+export const baseLogger = pino({
+    level: process.env.LOG_LEVEL || "info",
+    timestamp: pino.stdTimeFunctions.isoTime,
+    base: { runId: RUN_ID },
+    transport: transportOptions,
+});
+
+/**
+ * Ensures strict one physical line per log call message. 
+ * Any embedded newlines must be surfaced as spaces.
+ */
+function sanitizeMessage(msg: string): string {
+    return msg.replace(/\r?\n/g, " ");
+}
+
+export function createLogger(scope: string) {
+    const childLogger = baseLogger.child({ scope });
+
+    function log(level: LogLevel, message: string, data?: Record<string, unknown>, duration_ms?: number) {
+        const safeMessage = sanitizeMessage(message);
+        const payload: Record<string, unknown> = { ...globalContext, ...data };
+
+        if (duration_ms !== undefined) {
+            payload.duration_ms = duration_ms;
         }
+
+        // Delegate to Pino
+        if (level === "debug") childLogger.debug(payload, safeMessage);
+        else if (level === "info") childLogger.info(payload, safeMessage);
+        else if (level === "warn") childLogger.warn(payload, safeMessage);
+        else childLogger.error(payload, safeMessage);
     }
 
     return {
         debug: (msg: string, data?: Record<string, unknown>) => log("debug", msg, data),
         info: (msg: string, data?: Record<string, unknown>) => log("info", msg, data),
         warn: (msg: string, data?: Record<string, unknown>) => log("warn", msg, data),
-        error: (msg: string, data?: Record<string, unknown>) => log("error", msg, data),
+        error: (msg: unknown, data?: Record<string, unknown>) => {
+            if (msg instanceof Error || (typeof msg === "object" && msg !== null)) {
+                const norm = normalizeError(msg);
+                log(norm.severity, norm.message, { ...data, actionHint: norm.actionHint, ...norm.data });
+            } else {
+                log("error", String(msg), data);
+            }
+        },
         /** Log with duration in ms */
         timed: (level: LogLevel, msg: string, duration_ms: number, data?: Record<string, unknown>) =>
             log(level, msg, data, duration_ms),
+        /** Normalizes and logs error, returns normalization object */
+        normalizedError: (err: unknown, data?: Record<string, unknown>): NormalizedError => {
+            const norm = normalizeError(err);
+            log(norm.severity, norm.message, { ...data, actionHint: norm.actionHint, ...norm.data });
+            return norm;
+        }
     };
 }
 

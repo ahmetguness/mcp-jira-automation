@@ -19,6 +19,7 @@ const log = createLogger("mcp:manager");
 function unwrapMcpResult(raw: unknown): unknown {
     // Case 1: Raw is already an object we can inspect
     if (raw && typeof raw === "object") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const anyRaw = raw as any;
 
         const structured = anyRaw.structuredContent?.result;

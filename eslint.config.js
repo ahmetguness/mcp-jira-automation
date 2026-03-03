@@ -21,7 +21,8 @@ export default tseslint.config(
             "@typescript-eslint/no-unsafe-call": "off",
             "@typescript-eslint/no-misused-promises": "off",
             "@typescript-eslint/no-non-null-assertion": "off",
-            "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+            "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+            "no-console": "error"
         }
     }
 );

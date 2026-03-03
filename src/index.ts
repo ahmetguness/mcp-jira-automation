@@ -6,12 +6,14 @@ import "dotenv/config";
 import { loadConfig } from "./config.js";
 import { App } from "./app.js";
 import { createLogger } from "./logger.js";
+import { printStartupBanner } from "./ui/startupBanner.js";
 
 const log = createLogger("main");
 
 async function main(): Promise<void> {
     try {
         const config = loadConfig();
+        printStartupBanner(config);
         const app = new App(config);
         await app.start();
     } catch (e: unknown) {
@@ -25,6 +27,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-    console.error("Fatal initialization error:", e);
+    log.error(`Fatal initialization error: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
 });

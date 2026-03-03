@@ -134,7 +134,7 @@ export class DockerExecutor {
             log.info(`Container ${containerName} finished (exit: ${exitCode})`);
 
             if (exitCode !== 0) {
-                log.error(`Docker execution failed (exit ${exitCode}).\n--- Output ---\n${output}\n--------------`);
+                log.error(`Docker execution failed (exit ${exitCode})`, { dockerOutput: output });
             }
 
             return {

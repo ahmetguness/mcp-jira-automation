@@ -35,7 +35,36 @@ export async function connectScmMcp(config: Config): Promise<McpConnection> {
         command,
         args,
         env: { ...process.env as Record<string, string>, ...env },
+        stderr: "pipe",
     });
+
+    if (transport.stderr) {
+        let stderrBuffer = "";
+        transport.stderr.on("data", (chunk: unknown) => {
+            const str = Buffer.isBuffer(chunk)
+                ? chunk.toString("utf-8")
+                : String(chunk);
+
+            stderrBuffer += str;
+            const lines = stderrBuffer.split("\n");
+
+            // The last item is either an empty string (if it ended with \n) 
+            // or a partial line that we must buffer for the next chunk.
+            stderrBuffer = lines.pop() || "";
+
+            for (const rawLine of lines) {
+                const line = rawLine.trim();
+                if (!line) continue;
+
+                // Determine if it's an error level or just info based on content, defaulting to debug/info
+                if (line.toLowerCase().includes("error") || line.toLowerCase().includes("fatal")) {
+                    log.error(line, { provider: name });
+                } else {
+                    log.debug(line, { provider: name });
+                }
+            }
+        });
+    }
 
     const client = new Client({ name: "mcp-jira-automation", version: "1.0.0" });
     await client.connect(transport);

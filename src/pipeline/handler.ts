@@ -44,10 +44,13 @@ export class PipelineHandler {
     /** Process a single issue through the full pipeline */
     async handle(issue: JiraIssue): Promise<PipelineResult> {
         const startTime = performance.now();
+        const state = this.state.get(issue.key);
+        const attempt = (state?.attemptCount ?? 0) + 1;
+        const maxAttempts = this.config.maxAttempts;
 
         // Check state for idempotency
         if (!this.state.shouldProcess(issue.key)) {
-            log.info(`Skipping ${issue.key} (already processed or locked)`);
+            log.info(`${issue.key} skipping (already processed or locked)`);
             return {
                 issueKey: issue.key,
                 success: true,
@@ -61,7 +64,7 @@ export class PipelineHandler {
 
         // Acquire lock
         if (!this.state.lock(issue.key)) {
-            log.warn(`Could not lock ${issue.key}`);
+            log.warn(`${issue.key} could not acquire lock`);
             return {
                 issueKey: issue.key,
                 success: false,
@@ -73,19 +76,18 @@ export class PipelineHandler {
             };
         }
 
+        log.info(`${issue.key} started (attempt ${attempt}/${maxAttempts})`, { issueKey: issue.key, step: "start" });
+
         try {
             // Step 1: Get repository
-            log.info(`[${issue.key}] Step 1: Reading repository field`);
             const repo = await this.jira.getRepositoryField(issue.key);
             if (!repo) {
                 throw new Error("No repository found on issue. Set the Repository custom field.");
             }
             issue.repository = repo;
-            log.info(`[${issue.key}] Repository: ${repo}`);
 
             // If approval required, write plan to Jira and wait
             if (this.config.requireApproval) {
-                log.info(`[${issue.key}] REQUIRE_APPROVAL=true, waiting for approval`);
                 await this.jira.addComment(
                     issue.key,
                     `🤖 *AI Cyber Bot* has picked up this issue.\n\nRepository: \`${repo}\`\n\nAnalysis will begin shortly. I'll post my plan for review before making changes.`,
@@ -93,21 +95,23 @@ export class PipelineHandler {
             }
 
             // Step 2: Build context
-            log.info(`[${issue.key}] Step 2: Building task context`);
             const { result: context, duration_ms: contextMs } = await withTiming(() =>
                 buildTaskContext(issue, this.scm, repo),
             );
-            log.timed("info", `[${issue.key}] Context built`, contextMs, {
-                sourceFiles: context.sourceFiles.length,
-                testFiles: context.testFiles.length,
+            log.timed("info", `${issue.key} context built`, contextMs, {
+                issueKey: issue.key,
+                step: "context",
+                source: context.sourceFiles.length,
+                tests: context.testFiles.length,
             });
 
             // Step 3: AI analysis
-            log.info(`[${issue.key}] Step 3: AI analysis`);
             const { result: analysis, duration_ms: aiMs } = await withTiming(() =>
                 this.ai.analyze(context),
             );
-            log.timed("info", `[${issue.key}] AI analysis complete`, aiMs, {
+            log.timed("info", `${issue.key} ai analysis complete`, aiMs, {
+                issueKey: issue.key,
+                step: "ai",
                 patches: analysis.patches.length,
                 commands: analysis.commands.length,
             });
@@ -131,21 +135,30 @@ export class PipelineHandler {
             }
 
             // Step 4: Execute in Docker
-            log.info(`[${issue.key}] Step 4: Executing in Docker`);
             const repoUrl = this.buildCloneUrl(repo);
-            const execution = await this.executor.execute(analysis, repoUrl, context.repo.defaultBranch);
+            const { result: execution, duration_ms: execMs } = await withTiming(() =>
+                this.executor.execute(analysis, repoUrl, context.repo.defaultBranch)
+            );
+            log.timed("info", `${issue.key} execution complete`, execMs, {
+                issueKey: issue.key,
+                step: "exec",
+                exitCode: execution.exitCode,
+                success: execution.success
+            });
 
             // Step 5: Create branch + PR (only if execution succeeded and there are patches)
             let prUrl: string | null = null;
             if (execution.success && analysis.patches.length > 0) {
-                log.info(`[${issue.key}] Step 5: Creating branch and PR`);
-                prUrl = await this.createBranchAndPr(issue, repo, analysis, context.repo.defaultBranch);
+                const { result, duration_ms: prMs } = await withTiming(() =>
+                    this.createBranchAndPr(issue, repo, analysis, context.repo.defaultBranch)
+                );
+                prUrl = result;
+                log.timed("info", `${issue.key} pr created`, prMs, { issueKey: issue.key, step: "pr", prUrl });
             } else if (!execution.success) {
-                log.warn(`[${issue.key}] Skipping PR creation because execution failed (exit ${execution.exitCode})`);
+                log.warn(`${issue.key} skipping PR creation because execution failed (exit ${execution.exitCode})`, { issueKey: issue.key, step: "pr" });
             }
 
             // Step 6: Report to Jira
-            log.info(`[${issue.key}] Step 6: Reporting to Jira`);
             const pipelineResult: PipelineResult = {
                 issueKey: issue.key,
                 success: execution.success,
@@ -162,17 +175,28 @@ export class PipelineHandler {
             // Update state
             if (execution.success) {
                 this.state.markSuccess(issue.key, prUrl ?? undefined);
+                log.info(`${issue.key} finished successfully`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
             } else {
                 this.handleFailureState(issue.key, `Exit code: ${execution.exitCode}`);
             }
 
-            log.info(`[${issue.key}] Pipeline complete (${pipelineResult.duration_ms}ms, success=${execution.success})`);
             return pipelineResult;
         } catch (e: unknown) {
-            const errMsg = e instanceof Error ? e.message : String(e);
-            log.error(`[${issue.key}] Pipeline failed: ${errMsg}`);
+            const norm = log.normalizedError(e, { issueKey: issue.key, step: "pipeline" });
+            const errMsg = norm.message;
+            const duration = Math.round(performance.now() - startTime);
 
-            this.handleFailureState(issue.key, errMsg);
+            if (norm.prExistsFlag) {
+                // If PR already exists, mark as done/skipped to avoid infinite loop
+                this.state.markSuccess(issue.key, undefined); // Or use a special skipped state if supported
+                this.jira.addComment(
+                    issue.key,
+                    `🤖 ⚠️ *AI Cyber Bot* encountered an issue: ${errMsg}.\n\n*Action needed:* ${norm.actionHint}`
+                ).catch((err) => log.error(`Failed to add PR exists comment: ${String(err)}`));
+                log.info(`${issue.key} finished (pr already exists)`, { issueKey: issue.key, duration_ms: duration });
+            } else {
+                this.handleFailureState(issue.key, errMsg);
+            }
 
             return {
                 issueKey: issue.key,
@@ -181,7 +205,7 @@ export class PipelineHandler {
                 execution: null,
                 prUrl: null,
                 error: errMsg,
-                duration_ms: Math.round(performance.now() - startTime),
+                duration_ms: duration,
             };
         }
     }

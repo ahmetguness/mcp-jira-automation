@@ -9,7 +9,7 @@ import { createScmProvider, type ScmProvider } from "./scm/index.js";
 import { createAiProvider, type AiProvider } from "./ai/index.js";
 import { PipelineHandler } from "./pipeline/handler.js";
 import { StateStore } from "./state/store.js";
-import { createLogger, setLogLevel } from "./logger.js";
+import { createLogger } from "./logger.js";
 
 const log = createLogger("app");
 
@@ -24,22 +24,12 @@ export class App {
     private webhook: JiraWebhook | null = null;
 
     constructor(private config: Config) {
-        setLogLevel(config.logLevel);
         this.mcp = new McpManager(config);
         this.state = new StateStore(config.stateFile);
     }
 
     /** Initialize all components */
     async start(): Promise<void> {
-        log.info("═══════════════════════════════════════════");
-        log.info("  MCP Jira Automation — AI Cyber Bot");
-        log.info("═══════════════════════════════════════════");
-        log.info(`SCM Provider: ${this.config.scmProvider}`);
-        log.info(`AI Provider:  ${this.config.aiProvider}`);
-        log.info(`Mode:         ${this.config.mode}`);
-        log.info(`Policy:       ${this.config.execPolicy}`);
-        log.info(`Approval:     ${this.config.requireApproval}`);
-        log.info("═══════════════════════════════════════════");
 
         // 1. Connect MCP servers
         log.info("Connecting to MCP servers...");
