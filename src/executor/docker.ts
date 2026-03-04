@@ -162,7 +162,8 @@ export class DockerExecutor {
             scoutContainer = await this.docker.createContainer({
                 Image: SCOUT_IMAGE,
                 name: scoutName,
-                Cmd: ["sleep", "infinity"],
+                Entrypoint: ["/bin/sh"],
+                Cmd: ["-c", "sleep 86400"],
                 WorkingDir: "/workspace",
                 Tty: false,
                 HostConfig: securityHostConfig([volumeBind]) as Docker.HostConfig,
