@@ -1,5 +1,5 @@
 
-[1m[46m RUN [49m[22m [36mv4.0.18 [39m[90m/workspace[39m
+ RUN  v4.0.18 /workspace
 
 No test files found, exiting with code 0
 
