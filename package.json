@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "vitest run",
+    "test:report": "vitest run > test-results.txt",
     "lint": "eslint src/"
   },
   "keywords": [
