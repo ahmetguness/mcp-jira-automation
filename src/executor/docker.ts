@@ -15,6 +15,7 @@
  */
 
 import Docker from "dockerode";
+import { PassThrough } from "node:stream";
 import { pack, type Pack } from "tar-stream";
 import { createLogger, withTiming } from "../logger.js";
 import type { Config } from "../config.js";
@@ -42,7 +43,8 @@ interface DockerRunResult {
 
 // ─── Shared security HostConfig ──────────────────────────────
 
-function securityHostConfig(binds?: string[]): Record<string, unknown> {
+function securityHostConfig(opts?: { binds?: string[]; readonlyRootfs?: boolean }): Record<string, unknown> {
+    const { binds, readonlyRootfs = true } = opts ?? {};
     return {
         AutoRemove: false,
         Memory: 512 * 1024 * 1024,        // 512MB
@@ -53,7 +55,7 @@ function securityHostConfig(binds?: string[]): Record<string, unknown> {
         SecurityOpt: ["no-new-privileges"],
         CapDrop: ["ALL"],
         CapAdd: ["CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"],
-        ReadonlyRootfs: true,
+        ReadonlyRootfs: readonlyRootfs,
         Tmpfs: {
             "/tmp": "exec,size=100M",
             "/root": "exec,size=100M",
@@ -166,7 +168,7 @@ export class DockerExecutor {
                 Cmd: ["-c", "sleep 86400"],
                 WorkingDir: "/workspace",
                 Tty: false,
-                HostConfig: securityHostConfig([volumeBind]) as Docker.HostConfig,
+                HostConfig: securityHostConfig({ binds: [volumeBind] }) as Docker.HostConfig,
                 Env: ["HOME=/root"],
             });
 
@@ -198,13 +200,11 @@ export class DockerExecutor {
             // Phase 2.2: Detect project type by scanning for marker files
             const detection = await this.detectProjectInContainer(scoutContainer, opts.environmentHint);
 
-            // Done with scout
-            await scoutContainer.stop().catch(() => { /* may already be stopped */ });
-            await scoutContainer.remove({ force: true }).catch(() => { /* ignore */ });
-            scoutContainer = null;
-            log.info(`Scout container ${scoutName} removed`);
-
             // ═══ Phase 3: Resolve Docker image ═══
+            // NOTE: Scout container stays alive until main container starts.
+            // On Docker Desktop (Windows/WSL2), removing the scout before the
+            // main container mounts the shared volume corrupts the overlayfs
+            // layer, causing "lstat … invalid argument" errors.
             let targetImage: string;
             if (this.configImage !== "auto") {
                 targetImage = this.configImage;
@@ -216,7 +216,7 @@ export class DockerExecutor {
 
             // ═══ Phase 4: Main container — deps + patches + commands ═══
             const mainName = `mcp-jira-exec-${ts}`;
-            log.info(`Creating main container ${mainName} (image: ${targetImage})`);
+            const mainWorkdir = detection.workdir;
 
             await this.ensureImage(targetImage);
 
@@ -224,28 +224,43 @@ export class DockerExecutor {
             const envVars = [
                 "DEBIAN_FRONTEND=noninteractive",
                 "HOME=/root",
+                "NO_COLOR=1",
+                "FORCE_COLOR=0",
                 ...LANGUAGE_ENV[detection.language],
             ];
+
+            // NOTE: WorkingDir is NOT set during container creation.
+            // On Docker Desktop (Windows/WSL2), setting WorkingDir triggers an
+            // lstat syscall on the overlayfs layer that fails with "invalid argument"
+            // for complex images like node:20-bookworm. Instead, workdir is passed
+            // to each exec call individually.
+            log.info(`Creating main container ${mainName} (image: ${targetImage}, workdir: ${mainWorkdir}, readonlyRootfs: false)`);
 
             mainContainer = await this.docker.createContainer({
                 Image: targetImage,
                 name: mainName,
                 Cmd: ["sleep", "infinity"],
-                WorkingDir: detection.workdir,
                 Tty: false,
-                HostConfig: securityHostConfig([volumeBind]) as Docker.HostConfig,
+                HostConfig: securityHostConfig({ binds: [volumeBind], readonlyRootfs: false }) as Docker.HostConfig,
                 Env: envVars,
             });
+            log.info(`Main container ${mainName} created, starting...`);
 
             await mainContainer.start();
             log.info(`Main container ${mainName} started`);
+
+            // Now safe to release the scout — main container holds the volume reference.
+            await scoutContainer.stop().catch(() => { /* may already be stopped */ });
+            await scoutContainer.remove({ force: true }).catch(() => { /* ignore */ });
+            scoutContainer = null;
+            log.info(`Scout container ${scoutName} removed`);
 
             // Phase 4.1: Install dependencies
             if (detection.installCmd && detection.installCmd.length > 0) {
                 const installCmd = applyInstallScriptsPolicy(detection.installCmd, this.allowInstallScripts);
                 log.info(`Installing dependencies: ${installCmd.join(" ")}`);
 
-                const installResult = await this.execInContainer(mainContainer, installCmd);
+                const installResult = await this.execInContainer(mainContainer, installCmd, mainWorkdir);
                 allOutput.push(installResult.output);
 
                 if (installResult.exitCode !== 0) {
@@ -271,7 +286,7 @@ export class DockerExecutor {
                 const tokens = tokenizeCommand(cmd);
                 log.info(`Running: ${tokens.join(" ")}`);
 
-                const result = await this.execInContainer(mainContainer, tokens);
+                const result = await this.execInContainer(mainContainer, tokens, mainWorkdir);
                 allOutput.push(`>>> ${cmd}\n${result.output}`);
                 lastExitCode = result.exitCode;
 
@@ -285,7 +300,7 @@ export class DockerExecutor {
 
             // Phase 5: Capture new or modified files
             log.info(`Capturing generated artifacts from container ${mainName}`);
-            const statusResult = await this.execInContainer(mainContainer, ["git", "status", "--porcelain"]);
+            const statusResult = await this.execInContainer(mainContainer, ["git", "status", "--porcelain"], mainWorkdir);
             const capturedPatches: { path: string; content: string; action: "create" | "modify" }[] = [];
 
             if (statusResult.exitCode === 0 && statusResult.output) {
@@ -299,7 +314,7 @@ export class DockerExecutor {
                     else if (status.includes("M") || status.includes("A")) action = "modify";
 
                     if (action) {
-                        const contentResult = await this.execInContainer(mainContainer, ["cat", file]);
+                        const contentResult = await this.execInContainer(mainContainer, ["cat", file], mainWorkdir);
                         if (contentResult.exitCode === 0) {
                             capturedPatches.push({
                                 path: file,
@@ -399,25 +414,39 @@ export class DockerExecutor {
     private async execInContainer(
         container: Docker.Container,
         cmd: string[],
+        workdir?: string,
     ): Promise<{ exitCode: number; output: string }> {
         const exec = await container.exec({
             Cmd: cmd,
             AttachStdout: true,
             AttachStderr: true,
+            ...(workdir ? { WorkingDir: workdir } : {}),
         });
 
         const stream = await exec.start({ Detach: false, Tty: false });
 
+        // Docker multiplexes stdout/stderr with 8-byte binary frame headers
+        // when Tty=false.  We must demux to get clean text output.
         const output = await new Promise<string>((resolve, reject) => {
-            const chunks: Buffer[] = [];
+            const stdout = new PassThrough();
+            const stderr = new PassThrough();
+            const stdoutChunks: Buffer[] = [];
+            const stderrChunks: Buffer[] = [];
+
             const timeout = setTimeout(() => {
                 reject(new Error("Container execution timed out"));
             }, this.timeoutMs);
 
-            stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+            stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+            stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+            this.docker.modem.demuxStream(stream, stdout, stderr);
+
             stream.on("end", () => {
                 clearTimeout(timeout);
-                resolve(Buffer.concat(chunks).toString("utf-8"));
+                const out = Buffer.concat(stdoutChunks).toString("utf-8");
+                const err = Buffer.concat(stderrChunks).toString("utf-8");
+                resolve(out + err);
             });
             stream.on("error", (err: Error) => {
                 clearTimeout(timeout);
