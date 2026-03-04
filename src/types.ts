@@ -47,6 +47,8 @@ export interface AiAnalysis {
     patches: AiPatch[];
     /** Shell commands to run for testing */
     commands: string[];
+    /** Optional AI-suggested environment: "node" | "python" | "go" | "rust" | "java" | "unknown" */
+    environment?: string;
 }
 
 export interface AiPatch {
@@ -68,6 +70,8 @@ export interface ExecutionResult {
     commands: string[];
     /** Commands that were blocked by policy */
     blocked: string[];
+    /** Files created or modified during execution */
+    patches?: AiPatch[];
 }
 
 // ─── State ───────────────────────────────────────────────────

@@ -44,7 +44,8 @@ const configSchema = z.object({
     // Executor
     execPolicy: z.enum(["strict", "permissive"]).default("strict"),
     execTimeoutMs: z.coerce.number().int().default(300_000), // 5 min
-    dockerImage: z.string().default("node:20-bookworm"),
+    dockerImage: z.string().default("auto"),
+    allowInstallScripts: z.coerce.boolean().default(false),
 
     // MCP server paths
     mcpAtlassianUrl: z.string().default("http://127.0.0.1:9000/sse"),
@@ -101,7 +102,8 @@ export function loadConfig(): Config {
         // Executor
         execPolicy: process.env.EXEC_POLICY ?? "strict",
         execTimeoutMs: process.env.EXEC_TIMEOUT_MS ?? "300000",
-        dockerImage: process.env.DOCKER_IMAGE ?? "node:20-slim",
+        dockerImage: process.env.DOCKER_IMAGE ?? "auto",
+        allowInstallScripts: (process.env.ALLOW_INSTALL_SCRIPTS ?? "false").toLowerCase() === "true",
 
         // MCP
         mcpAtlassianUrl: process.env.MCP_SSE_URL ?? "http://127.0.0.1:9000/sse",

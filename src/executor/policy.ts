@@ -31,16 +31,31 @@ const ALLOWLIST: AllowedCommand[] = [
     { bin: "npm", subcommands: ["ci", "install", "test", "run"] },
     { bin: "pnpm", subcommands: ["install", "test", "run"] },
     { bin: "yarn", subcommands: ["install", "test", "run"] },
+    { bin: "bun", subcommands: ["install", "test", "run"] },
     { bin: "npx", argPattern: /^[\w@/.-]+$/ },
 
-    // Test frameworks
+    // Python
     { bin: "pytest", standalone: true },
     { bin: "python", subcommands: ["-m"], argPattern: /^pytest/ },
-    { bin: "go", subcommands: ["test"] },
-    { bin: "mvn", subcommands: ["test", "verify", "package"] },
-    { bin: "gradle", subcommands: ["test", "build"] },
-    { bin: "cargo", subcommands: ["test"] },
+    { bin: "pip", subcommands: ["install"] },
+    { bin: "pip3", subcommands: ["install"] },
+    { bin: "pipenv", subcommands: ["install"] },
+
+    // Go
+    { bin: "go", subcommands: ["test", "mod"] },
+
+    // Java
+    { bin: "mvn", subcommands: ["test", "verify", "package", "dependency:resolve"] },
+    { bin: "gradle", subcommands: ["test", "build", "dependencies"] },
+    { bin: "./gradlew", subcommands: ["test", "build", "dependencies"] },
+
+    // Rust
+    { bin: "cargo", subcommands: ["test", "fetch"] },
+
+    // .NET
     { bin: "dotnet", subcommands: ["test"] },
+
+    // Build tools
     { bin: "make", subcommands: ["test", "build", "check"] },
 
     // Safe read-only utilities

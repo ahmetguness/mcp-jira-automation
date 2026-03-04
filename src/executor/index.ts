@@ -70,6 +70,7 @@ export class Executor {
                 branch,
                 commands: allowed,
                 patches,
+                environmentHint: analysis.environment,
             }),
         );
 
@@ -83,6 +84,7 @@ export class Executor {
             duration_ms,
             commands: allowed,
             blocked,
+            patches: result.patches,
         };
     }
 }

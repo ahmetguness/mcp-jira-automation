@@ -42,15 +42,25 @@ You MUST respond with a valid JSON object with this exact structure:
   ],
   "commands": [
     "npm ci",
-    "npm test"
-  ]
+    "npm run test:report > test-results.txt"
+  ],
+  "environment": "node"
 }
+
+Notes on patches:
+- You do NOT have to provide patches if no code changes are necessary to fulfill the Jira issue (e.g. if the user only asks to run a test and report the result). The \`patches\` array can be empty.
+- If the user wants to commit a generated file (like a test report or build artifact), do NOT fake a code change. Just include the command to generate it (e.g., \`npm test > report.txt\`), and the system will automatically parse and include the generated file in the PR.
 
 Notes on commands:
 - Only include safe, standard test/build commands
 - Common safe commands: npm ci, npm test, npm run build, pnpm test, pytest, go test, mvn test
 - Do NOT include destructive commands (rm -rf, sudo, curl | bash, etc.)
-- Do NOT include installation commands that modify the system`;
+- Do NOT include installation commands that modify the system
+
+Notes on environment:
+- Set "environment" to the primary language/runtime of the repository: "node", "python", "go", "rust", "java", or "unknown"
+- This helps the executor select the correct Docker image for running commands
+- The system will auto-detect from marker files; this is a fallback hint`;
 }
 
 /** Build the user prompt from TaskContext */
@@ -97,6 +107,7 @@ export function parseAiResponse(text: string): AiAnalysis {
             plan: parsed.plan ?? "",
             patches: Array.isArray(parsed.patches) ? parsed.patches : [],
             commands: Array.isArray(parsed.commands) ? parsed.commands : [],
+            environment: typeof parsed.environment === "string" ? parsed.environment : undefined,
         };
     } catch {
         // If JSON parsing fails, return the raw text as summary

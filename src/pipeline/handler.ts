@@ -148,9 +148,15 @@ export class PipelineHandler {
 
             // Step 5: Create branch + PR (only if execution succeeded and there are patches)
             let prUrl: string | null = null;
-            if (execution.success && analysis.patches.length > 0) {
+
+            const combinedPatches = [
+                ...analysis.patches,
+                ...(execution.patches || [])
+            ];
+
+            if (execution.success && combinedPatches.length > 0) {
                 const { result, duration_ms: prMs } = await withTiming(() =>
-                    this.createBranchAndPr(issue, repo, analysis, context.repo.defaultBranch)
+                    this.createBranchAndPr(issue, repo, analysis, combinedPatches, context.repo.defaultBranch)
                 );
                 prUrl = result;
                 log.timed("info", `${issue.key} pr created`, prMs, { issueKey: issue.key, step: "pr", prUrl });
@@ -256,6 +262,7 @@ export class PipelineHandler {
         issue: JiraIssue,
         repo: string,
         analysis: AiAnalysis,
+        patches: import("../types.js").AiPatch[],
         defaultBranch: string,
     ): Promise<string> {
         const branchName = `ai/${issue.key.toLowerCase()}-${slugify(issue.summary)}`;
@@ -265,7 +272,7 @@ export class PipelineHandler {
             await this.scm.createBranch(repo, branchName, defaultBranch);
 
             // Commit patches
-            for (const patch of analysis.patches) {
+            for (const patch of patches) {
                 if (patch.action === "delete") continue;
                 await this.scm.writeFile(
                     repo,
