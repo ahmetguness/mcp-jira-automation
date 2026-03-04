@@ -98,6 +98,30 @@ export class DockerExecutor {
         }
     }
 
+    /** Pull image if not found locally */
+    private async ensureImage(imageName: string): Promise<void> {
+        try {
+            log.debug(`Checking if image ${imageName} exists locally...`);
+            await this.docker.getImage(imageName).inspect();
+        } catch (e: any) {
+            if (e.statusCode === 404) {
+                log.info(`Image ${imageName} not found locally. Pulling...`);
+                await new Promise<void>((resolve, reject) => {
+                    this.docker.pull(imageName, (err: Error | null, stream: NodeJS.ReadableStream) => {
+                        if (err) return reject(err);
+                        this.docker.modem.followProgress(stream, (onFinishedErr: Error | null) => {
+                            if (onFinishedErr) return reject(onFinishedErr);
+                            resolve();
+                        });
+                    });
+                });
+                log.info(`Successfully pulled image ${imageName}`);
+            } else {
+                throw e;
+            }
+        }
+    }
+
     /**
      * Run commands in an isolated Docker container.
      *
@@ -132,6 +156,8 @@ export class DockerExecutor {
             // ═══ Phase 2: Scout container — clone + detect ═══
             const scoutName = `mcp-scout-${ts}`;
             log.info(`Creating scout container ${scoutName}`);
+
+            await this.ensureImage(SCOUT_IMAGE);
 
             scoutContainer = await this.docker.createContainer({
                 Image: SCOUT_IMAGE,
@@ -190,6 +216,8 @@ export class DockerExecutor {
             // ═══ Phase 4: Main container — deps + patches + commands ═══
             const mainName = `mcp-jira-exec-${ts}`;
             log.info(`Creating main container ${mainName} (image: ${targetImage})`);
+
+            await this.ensureImage(targetImage);
 
             // Build environment variables
             const envVars = [

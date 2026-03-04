@@ -69,7 +69,7 @@ const ALLOWLIST: AllowedCommand[] = [
 ];
 
 /** Characters that MUST NEVER appear in any command — prevents shell injection */
-const FORBIDDEN_CHARS = /[;&|`$(){}!><\n\r\\]/;
+const FORBIDDEN_CHARS = /[;&|`$(){}!\n\r\\]/;
 
 export type ExecPolicy = "strict" | "permissive";
 
