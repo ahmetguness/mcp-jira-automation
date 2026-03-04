@@ -2,6 +2,7 @@
  * Entry point — loads config and starts the app.
  */
 
+import "./ensureUtf8.js";
 import "dotenv/config";
 import { loadConfig } from "./config.js";
 import { App } from "./app.js";

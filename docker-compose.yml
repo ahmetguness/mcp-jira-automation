@@ -15,6 +15,29 @@ services:
       - JIRA_API_TOKEN=${JIRA_API_TOKEN}
     restart: unless-stopped
 
+  # Docker Socket Proxy — only whitelisted API endpoints exposed
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1    # create / start / wait / logs / remove
+      POST: 1          # POST requests (create/start)
+      EXEC: 1          # docker exec
+      IMAGES: 1        # pull images
+      NETWORKS: 0
+      VOLUMES: 0
+      SERVICES: 0
+      AUTH: 0
+      SECRETS: 0
+      SWARM: 0
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2375/_ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
   # AI Cyber Bot runner
   runner:
     build:
@@ -23,11 +46,25 @@ services:
       - .env
     environment:
       - MCP_SSE_URL=http://mcp-atlassian:9000/sse
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=100M
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - runner-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 100
+    mem_limit: 1g
+    cpus: "1.0"
     depends_on:
-      - mcp-atlassian
+      docker-socket-proxy:
+        condition: service_healthy
+      mcp-atlassian:
+        condition: service_started
     restart: unless-stopped
 
 volumes:

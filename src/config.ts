@@ -125,7 +125,26 @@ export function loadConfig(): Config {
         throw new Error(`Invalid configuration: ${errors}`);
     }
 
+    auditSecrets(result.data);
     return result.data;
+}
+
+/** Log secret presence (set/unset + length) — values are NEVER logged */
+function auditSecrets(config: Config): void {
+    const secrets: [string, string | undefined][] = [
+        ["JIRA_API_TOKEN", config.jiraApiToken],
+        ["GITHUB_TOKEN", config.githubToken],
+        ["OPENAI_API_KEY", config.openaiApiKey],
+        ["ANTHROPIC_API_KEY", config.anthropicApiKey],
+        ["GEMINI_API_KEY", config.geminiApiKey],
+    ];
+    for (const [name, value] of secrets) {
+        if (value) {
+            log.info(`Secret ${name}: SET (len=${value.length})`);
+        } else {
+            log.debug(`Secret ${name}: NOT SET`);
+        }
+    }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────

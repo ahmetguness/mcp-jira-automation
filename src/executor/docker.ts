@@ -1,11 +1,19 @@
 /**
  * Docker-based isolated executor.
  * Runs AI-generated commands inside a temporary container.
+ *
+ * Security model:
+ * - git clone via Cmd array (no shell interpolation)
+ * - Patches written via putArchive (tar stream, no heredoc)
+ * - Each command exec'd individually via Cmd array
+ * - Container: cap_drop ALL, no-new-privileges, ReadonlyRootfs + writable /workspace & /tmp
  */
 
 import Docker from "dockerode";
+import { pack, type Pack } from "tar-stream";
 import { createLogger, withTiming } from "../logger.js";
 import type { Config } from "../config.js";
+import { validateBranchName, validateRepoUrl, validatePatchPath, tokenizeCommand } from "../sanitize.js";
 
 const log = createLogger("executor:docker");
 
@@ -21,7 +29,16 @@ export class DockerExecutor {
     private timeoutMs: number;
 
     constructor(config: Config) {
-        this.docker = new Docker();
+        const dockerHost = process.env.DOCKER_HOST;
+        if (dockerHost) {
+            const url = new URL(dockerHost);
+            this.docker = new Docker({
+                host: url.hostname,
+                port: Number(url.port) || 2375,
+            });
+        } else {
+            this.docker = new Docker();
+        }
         this.image = config.dockerImage;
         this.timeoutMs = config.execTimeoutMs;
         log.info(`Docker executor initialized (image: ${this.image}, timeout: ${this.timeoutMs}ms)`);
@@ -41,12 +58,12 @@ export class DockerExecutor {
     /**
      * Run commands in an isolated Docker container.
      *
-     * Steps:
-     * 1. Create temporary container with repo cloned
-     * 2. Apply patches (write files)
-     * 3. Run commands sequentially
-     * 4. Collect output
-     * 5. Remove container
+     * Phases:
+     * 1. Create container (idle with sleep)
+     * 2. git clone via exec Cmd array
+     * 3. Write patches via putArchive (tar)
+     * 4. Run each command via exec Cmd array
+     * 5. Collect output + remove container
      */
     async run(opts: {
         repoUrl: string;
@@ -54,122 +71,207 @@ export class DockerExecutor {
         commands: string[];
         patches?: { path: string; content: string }[];
     }): Promise<DockerRunResult> {
+        // Validate inputs before any Docker interaction
+        const safeBranch = validateBranchName(opts.branch);
+        const safeRepoUrl = validateRepoUrl(opts.repoUrl);
+
         const containerName = `mcp-jira-exec-${Date.now()}`;
         let container: Docker.Container | null = null;
+        const allOutput: string[] = [];
 
         try {
-            // Build the setup script: clone repo, apply patches, run commands
-            const setupCommands: string[] = [
-                "set -e",
-                `git clone --depth 1 --branch ${opts.branch} ${opts.repoUrl} /workspace 2>&1 || git clone --depth 1 ${opts.repoUrl} /workspace 2>&1`,
-                "cd /workspace",
-            ];
-
-            // Apply patches
-            if (opts.patches?.length) {
-                for (const patch of opts.patches) {
-                    const dir = patch.path.split("/").slice(0, -1).join("/");
-                    if (dir) {
-                        setupCommands.push(`mkdir -p /workspace/${dir}`);
-                    }
-                    // Use heredoc for file content to handle special characters
-                    const safeContent = patch.content.replace(/'/g, "'\\''");
-                    setupCommands.push(
-                        `cat > /workspace/${patch.path} << 'PATCH_EOF'\n${safeContent}\nPATCH_EOF`,
-                    );
-                }
-            }
-
-            // Add test commands
-            for (const cmd of opts.commands) {
-                setupCommands.push(`echo ">>> Running: ${cmd.replace(/"/g, '\\"')}"`);
-                setupCommands.push(cmd);
-            }
-
-            const fullScript = setupCommands.join("\n");
-
             log.info(`Creating container ${containerName}`);
 
+            // Phase 1: Create idle container
             container = await this.docker.createContainer({
                 Image: this.image,
                 name: containerName,
-                Cmd: ["sh", "-lc", fullScript],
+                Cmd: ["sleep", "infinity"],
                 WorkingDir: "/workspace",
-                Tty: true,
+                Tty: false,
                 HostConfig: {
-                    // Security: no network needed for tests in most cases
-                    // But we need it for git clone and npm install
                     AutoRemove: false,
-                    Memory: 512 * 1024 * 1024, // 512MB
-                    MemorySwap: 1024 * 1024 * 1024, // 1GB
+                    Memory: 512 * 1024 * 1024,       // 512MB
+                    MemorySwap: 1024 * 1024 * 1024,   // 1GB
                     CpuPeriod: 100000,
-                    CpuQuota: 100000, // 1 CPU
+                    CpuQuota: 100000,                  // 1 CPU
+                    PidsLimit: 256,
+                    SecurityOpt: ["no-new-privileges"],
+                    CapDrop: ["ALL"],
+                    CapAdd: ["CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"],
+                    ReadonlyRootfs: true,
+                    Tmpfs: {
+                        "/tmp": "exec,size=100M",
+                        "/workspace": "exec,size=500M",
+                        "/root": "exec,size=100M",
+                    },
                 },
-                // Install git in the container if not present
                 Env: [
                     "DEBIAN_FRONTEND=noninteractive",
                     "HOME=/root",
+                    "npm_config_cache=/root/.npm"
                 ],
             });
 
             await container.start();
             log.info(`Container ${containerName} started`);
 
-            // Wait for completion with timeout
-            const { result: waitResult } = await withTiming(async () => {
-                return Promise.race([
-                    container!.wait() as Promise<{ StatusCode: number }>,
-                    new Promise<{ StatusCode: number }>((_, reject) =>
-                        setTimeout(() => reject(new Error("Container execution timed out")), this.timeoutMs),
-                    ),
+            // Phase 2: git clone via Cmd array (no shell interpolation)
+            const cloneResult = await this.execInContainer(container, [
+                "git", "clone", "--depth", "1", "--branch", safeBranch, safeRepoUrl, "/workspace",
+            ]);
+            allOutput.push(cloneResult.output);
+
+            if (cloneResult.exitCode !== 0) {
+                // Fallback: clone without branch
+                log.warn(`Branch clone failed, retrying without --branch`);
+                const fallbackResult = await this.execInContainer(container, [
+                    "git", "clone", "--depth", "1", safeRepoUrl, "/workspace",
                 ]);
-            });
-
-            // Collect logs
-            const logStream = await container.logs({ stdout: true, stderr: true, follow: false });
-            // Since Tty is true, stdout and stderr are not multiplexed
-            const output = logStream.toString("utf-8");
-
-            const exitCode = waitResult.StatusCode;
-            log.info(`Container ${containerName} finished (exit: ${exitCode})`);
-
-            if (exitCode !== 0) {
-                log.error(`Docker execution failed (exit ${exitCode})`, { dockerOutput: output });
+                allOutput.push(fallbackResult.output);
+                if (fallbackResult.exitCode !== 0) {
+                    log.error(`Git clone failed (exit ${fallbackResult.exitCode})`);
+                    return {
+                        exitCode: fallbackResult.exitCode,
+                        stdout: allOutput.join("\n").slice(0, 50000),
+                        stderr: "Git clone failed",
+                    };
+                }
             }
 
+            // Phase 3: Write patches via putArchive (tar stream)
+            if (opts.patches?.length) {
+                await this.writePatchesToContainer(container, opts.patches);
+                log.info(`Wrote ${opts.patches.length} patch(es) via putArchive`);
+            }
+
+            // Phase 4: Run each command via exec Cmd array
+            let lastExitCode = 0;
+            for (const cmd of opts.commands) {
+                const tokens = tokenizeCommand(cmd);
+                log.info(`Running: ${tokens.join(" ")}`);
+
+                const result = await this.execInContainer(container, tokens);
+                allOutput.push(`>>> ${cmd}\n${result.output}`);
+                lastExitCode = result.exitCode;
+
+                if (result.exitCode !== 0) {
+                    log.error(`Command failed (exit ${result.exitCode}): ${cmd}`);
+                    break;
+                }
+            }
+
+            log.info(`Container ${containerName} finished (exit: ${lastExitCode})`);
+
             return {
-                exitCode: exitCode,
-                stdout: output.slice(0, 50000), // Limit output size
+                exitCode: lastExitCode,
+                stdout: allOutput.join("\n").slice(0, 50000),
                 stderr: "",
             };
         } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : String(e);
             log.error(`Container execution failed: ${errMsg}`);
 
-            // Try to kill the container if it timed out
             if (container) {
-                try {
-                    await container.kill();
-                } catch {
-                    // Container may already be stopped
-                }
+                try { await container.kill(); } catch { /* already stopped */ }
             }
 
             return {
                 exitCode: 1,
-                stdout: "",
+                stdout: allOutput.join("\n").slice(0, 50000),
                 stderr: errMsg,
             };
         } finally {
-            // Clean up container
             if (container) {
                 try {
                     await container.remove({ force: true });
                     log.debug(`Container ${containerName} removed`);
-                } catch {
-                    // Ignore cleanup errors
-                }
+                } catch { /* ignore cleanup errors */ }
             }
+        }
+    }
+
+    /** Execute a command inside a running container, returning exit code + output */
+    private async execInContainer(
+        container: Docker.Container,
+        cmd: string[],
+    ): Promise<{ exitCode: number; output: string }> {
+        const exec = await container.exec({
+            Cmd: cmd,
+            AttachStdout: true,
+            AttachStderr: true,
+        });
+
+        const stream = await exec.start({ Detach: false, Tty: false });
+
+        const output = await new Promise<string>((resolve, reject) => {
+            const chunks: Buffer[] = [];
+            const timeout = setTimeout(() => {
+                reject(new Error("Container execution timed out"));
+            }, this.timeoutMs);
+
+            stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+            stream.on("end", () => {
+                clearTimeout(timeout);
+                resolve(Buffer.concat(chunks).toString("utf-8"));
+            });
+            stream.on("error", (err: Error) => {
+                clearTimeout(timeout);
+                reject(err);
+            });
+        });
+
+        const inspect = await exec.inspect();
+        return { exitCode: inspect.ExitCode ?? 1, output };
+    }
+
+    /** Write patch files to container via tar archive — no shell, no heredoc */
+    private async writePatchesToContainer(
+        container: Docker.Container,
+        patches: { path: string; content: string }[],
+    ): Promise<void> {
+        const archive: Pack = pack();
+
+        for (const p of patches) {
+            const safePath = validatePatchPath(p.path);
+            const buf = Buffer.from(p.content, "utf-8");
+            archive.entry({ name: safePath, size: buf.length }, buf);
+        }
+
+        archive.finalize();
+
+        // Workaround for Docker putArchive returning 400 when Rootfs is read-only.
+        // We use docker exec with tar to extract the archive from stdin directly into /workspace.
+        // SECURITY: Using Cmd array prevents shell injection. -f - reads from stdin safely.
+        const exec = await container.exec({
+            Cmd: ["tar", "-x", "-f", "-", "-C", "/workspace"],
+            AttachStdin: true,
+            AttachStdout: true,
+            AttachStderr: true,
+        });
+
+        const stream = await exec.start({ stdin: true, hijack: true });
+
+        // Pipe our safe tar stream directly into the exec process
+        await new Promise<void>((resolve, reject) => {
+            archive.on("error", reject);
+            stream.on("error", reject);
+
+            // Resolve when tar finishes writing to stream
+            stream.on("end", resolve);
+
+            archive.pipe(stream);
+        });
+
+        let inspect = await exec.inspect();
+        // Wait for the exec process to fully exit to reliably get ExitCode
+        while (inspect.Running) {
+            await new Promise((r) => setTimeout(r, 100));
+            inspect = await exec.inspect();
+        }
+
+        if (inspect.ExitCode !== 0) {
+            throw new Error(`Failed to apply patches via tar (exit code ${inspect.ExitCode})`);
         }
     }
 }
