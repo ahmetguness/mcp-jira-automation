@@ -209,6 +209,12 @@ export class DockerExecutor {
             if (this.configImage !== "auto") {
                 targetImage = this.configImage;
                 log.info(`Using explicit image from config: ${targetImage}`);
+
+                // Smart Override: Don't use a forced image if it conflicts with the detected language
+                if (detection.language !== 'unknown' && !targetImage.includes(detection.language)) {
+                    log.warn(`Explicit image ${targetImage} conflicts with detection of ${detection.language} (confidence: ${detection.confidence}). Overriding to ${detection.image}`);
+                    targetImage = detection.image;
+                }
             } else {
                 targetImage = detection.image;
                 log.info(`Auto-detected image: ${targetImage} (lang=${detection.language}, confidence=${detection.confidence})`);

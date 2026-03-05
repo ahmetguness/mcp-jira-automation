@@ -53,9 +53,18 @@ Notes on patches:
 
 Notes on commands:
 - Only include safe, standard test/build commands
-- Common safe commands: npm ci, npm test, npm run build, pnpm test, pytest, go test, mvn test
+- Common safe commands: npm ci, npm test, npm run build, pnpm test, python -m pytest, go test, mvn test
+- You MUST scan the provided 'Source Files' and 'Test Files' for external imports (e.g. \`import pandas\`, \`from fastapi import FastAPI\`).
+- CRITICAL: You MUST explicitly install ALL application dependencies found in the imports of the provided files using pip install, IN ADDITION TO the testing framework (e.g. \`pip install pytest fastapi httpx pandas\`). If you fail to do this, the tests will fail with ModuleNotFoundError!
+- WARNING: pip installed binaries may not be in the PATH. Always prefix them (e.g. use \`python -m pytest\` instead of \`pytest\`).
+- Do NOT use shell operators like &&, ||, or ;. Instead, list sequential commands separately in the 'commands' array
 - Do NOT include destructive commands (rm -rf, sudo, curl | bash, etc.)
-- Do NOT include installation commands that modify the system
+- Do NOT include installation commands that modify the system externally
+
+Notes on writing tests:
+- When writing tests for web APIs, DO NOT make live network requests (like \`requests.get('http://localhost')\`) unless you are explicitly instructed to start the server. The server will not be running in the test environment.
+- Instead, you MUST use the web framework's native testing client (e.g., FastAPI \`TestClient\`, Flask \`test_client\`, Express \`supertest\`) and import the app object directly from the source code.
+- If testing FastAPI using \`TestClient\`, you MUST also include \`httpx\` in your \`pip install\` command!
 
 Notes on environment:
 - Set "environment" to the primary language/runtime of the repository: "node", "python", "go", "rust", "java", or "unknown"

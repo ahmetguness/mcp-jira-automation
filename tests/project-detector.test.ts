@@ -12,7 +12,7 @@ describe("detectProject — Node.js", () => {
     it("detects package-lock.json at root as high confidence npm ci", () => {
         const d = detectProject(["package-lock.json", "package.json"]);
         expect(d.language).toBe("node");
-        expect(d.image).toBe("node:20-slim");
+        expect(d.image).toBe("node:20-bookworm");
         expect(d.installCmd).toEqual(["npm", "ci"]);
         expect(d.confidence).toBe("high");
         expect(d.workdir).toBe("/workspace");
@@ -53,7 +53,7 @@ describe("detectProject — Python", () => {
     it("detects requirements.txt", () => {
         const d = detectProject(["requirements.txt"]);
         expect(d.language).toBe("python");
-        expect(d.image).toBe("python:3.12-slim");
+        expect(d.image).toBe("python:3.12-bookworm");
         expect(d.installCmd).toEqual(["pip", "install", "-r", "requirements.txt"]);
     });
 
@@ -87,7 +87,7 @@ describe("detectProject — Rust", () => {
     it("detects Cargo.toml", () => {
         const d = detectProject(["Cargo.toml"]);
         expect(d.language).toBe("rust");
-        expect(d.image).toBe("rust:1.77-slim");
+        expect(d.image).toBe("rust:1.77");
         expect(d.installCmd).toEqual(["cargo", "fetch"]);
     });
 });

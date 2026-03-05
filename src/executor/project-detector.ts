@@ -45,22 +45,22 @@ interface MarkerRule {
  */
 const MARKER_REGISTRY: MarkerRule[] = [
     // Node.js — lockfiles first
-    { file: "package-lock.json", language: "node", image: "node:20-slim", priority: 1, isLockfile: true, installCmd: ["npm", "ci"] },
-    { file: "pnpm-lock.yaml", language: "node", image: "node:20-slim", priority: 2, isLockfile: true, installCmd: ["pnpm", "install"] },
-    { file: "yarn.lock", language: "node", image: "node:20-slim", priority: 3, isLockfile: true, installCmd: ["yarn", "install", "--frozen-lockfile"] },
+    { file: "package-lock.json", language: "node", image: "node:20-bookworm", priority: 1, isLockfile: true, installCmd: ["npm", "ci"] },
+    { file: "pnpm-lock.yaml", language: "node", image: "node:20-bookworm", priority: 2, isLockfile: true, installCmd: ["pnpm", "install"] },
+    { file: "yarn.lock", language: "node", image: "node:20-bookworm", priority: 3, isLockfile: true, installCmd: ["yarn", "install", "--frozen-lockfile"] },
     { file: "bun.lockb", language: "node", image: "oven/bun:latest", priority: 4, isLockfile: true, installCmd: ["bun", "install"] },
-    { file: "package.json", language: "node", image: "node:20-slim", priority: 5, isLockfile: false, installCmd: ["npm", "install"] },
+    { file: "package.json", language: "node", image: "node:20-bookworm", priority: 5, isLockfile: false, installCmd: ["npm", "install"] },
 
     // Python
-    { file: "requirements.txt", language: "python", image: "python:3.12-slim", priority: 10, isLockfile: false, installCmd: ["pip", "install", "-r", "requirements.txt"] },
-    { file: "pyproject.toml", language: "python", image: "python:3.12-slim", priority: 11, isLockfile: false, installCmd: ["pip", "install", "."] },
-    { file: "Pipfile", language: "python", image: "python:3.12-slim", priority: 12, isLockfile: false, installCmd: ["sh", "-c", "pip install pipenv && pipenv install"] },
+    { file: "requirements.txt", language: "python", image: "python:3.12-bookworm", priority: 10, isLockfile: false, installCmd: ["pip", "install", "-r", "requirements.txt"] },
+    { file: "pyproject.toml", language: "python", image: "python:3.12-bookworm", priority: 11, isLockfile: false, installCmd: ["pip", "install", "."] },
+    { file: "Pipfile", language: "python", image: "python:3.12-bookworm", priority: 12, isLockfile: false, installCmd: ["sh", "-c", "pip install pipenv && pipenv install"] },
 
     // Go
     { file: "go.mod", language: "go", image: "golang:1.22-bookworm", priority: 20, isLockfile: false, installCmd: ["go", "mod", "download"] },
 
     // Rust
-    { file: "Cargo.toml", language: "rust", image: "rust:1.77-slim", priority: 30, isLockfile: false, installCmd: ["cargo", "fetch"] },
+    { file: "Cargo.toml", language: "rust", image: "rust:1.77", priority: 30, isLockfile: false, installCmd: ["cargo", "fetch"] },
 
     // Java — wrapper preferred
     { file: "pom.xml", language: "java", image: "maven:3.9-eclipse-temurin-21", priority: 40, isLockfile: false, installCmd: ["mvn", "-q", "dependency:resolve"] },
@@ -71,10 +71,10 @@ const MARKER_REGISTRY: MarkerRule[] = [
 // ─── AI Hint → Image Mapping ────────────────────────────────
 
 const HINT_IMAGE_MAP: Record<ProjectLanguage, string> = {
-    node: "node:20-slim",
-    python: "python:3.12-slim",
+    node: "node:20-bookworm",
+    python: "python:3.12-bookworm",
     go: "golang:1.22-bookworm",
-    rust: "rust:1.77-slim",
+    rust: "rust:1.77",
     java: "maven:3.9-eclipse-temurin-21",
     unknown: "ubuntu:24.04",
 };
