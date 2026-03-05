@@ -3,7 +3,6 @@ import {
     validateBranchName,
     validateRepoUrl,
     validatePatchPath,
-    tokenizeCommand,
 } from "../src/sanitize.js";
 import { isCommandAllowed, filterCommands } from "../src/executor/policy.js";
 
@@ -106,38 +105,6 @@ describe("validatePatchPath", () => {
     });
 });
 
-// ─── tokenizeCommand ─────────────────────────────────────────
-
-describe("tokenizeCommand", () => {
-    it("should tokenize simple commands", () => {
-        expect(tokenizeCommand("npm test")).toEqual(["npm", "test"]);
-        expect(tokenizeCommand("npm run build")).toEqual(["npm", "run", "build"]);
-        expect(tokenizeCommand("pytest")).toEqual(["pytest"]);
-    });
-
-    it("should handle extra whitespace", () => {
-        expect(tokenizeCommand("npm   test")).toEqual(["npm", "test"]);
-        expect(tokenizeCommand("  npm test  ")).toEqual(["npm", "test"]);
-    });
-
-    it("should handle single-quoted strings", () => {
-        expect(tokenizeCommand("echo 'hello world'")).toEqual(["echo", "hello world"]);
-        expect(tokenizeCommand("git commit -m 'fix bug'")).toEqual(["git", "commit", "-m", "fix bug"]);
-    });
-
-    it("should handle double-quoted strings", () => {
-        expect(tokenizeCommand('echo "hello world"')).toEqual(["echo", "hello world"]);
-    });
-
-    it("should handle -- separator", () => {
-        expect(tokenizeCommand("npm test -- --coverage")).toEqual(["npm", "test", "--", "--coverage"]);
-    });
-
-    it("should reject empty commands", () => {
-        expect(() => tokenizeCommand("")).toThrow();
-        expect(() => tokenizeCommand("   ")).toThrow();
-    });
-});
 
 // ─── Policy (allowlist + arg schema) ─────────────────────────
 

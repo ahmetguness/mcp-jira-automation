@@ -19,7 +19,7 @@ import { PassThrough } from "node:stream";
 import { pack, type Pack } from "tar-stream";
 import { createLogger, withTiming } from "../logger.js";
 import type { Config } from "../config.js";
-import { validateBranchName, validateRepoUrl, validatePatchPath, tokenizeCommand } from "../sanitize.js";
+import { validateBranchName, validateRepoUrl, validatePatchPath } from "../sanitize.js";
 import {
     detectProject,
     getAllMarkerFiles,
@@ -280,13 +280,12 @@ export class DockerExecutor {
                 log.info(`Wrote ${opts.patches.length} patch(es) via putArchive`);
             }
 
-            // Phase 4.3: Run each command via exec Cmd array
+            // Phase 4.3: Run each command via sh -c
             let lastExitCode = 0;
             for (const cmd of opts.commands) {
-                const tokens = tokenizeCommand(cmd);
-                log.info(`Running: ${tokens.join(" ")}`);
+                log.info(`Running: ${cmd}`);
 
-                const result = await this.execInContainer(mainContainer, tokens, mainWorkdir);
+                const result = await this.execInContainer(mainContainer, ["sh", "-c", cmd], mainWorkdir);
                 allOutput.push(`>>> ${cmd}\n${result.output}`);
                 lastExitCode = result.exitCode;
 
