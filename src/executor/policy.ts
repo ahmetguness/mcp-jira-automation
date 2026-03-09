@@ -1,150 +1,253 @@
-/**
- * Execution policy — allowlist + argument schema for command validation.
- *
- * Security model:
- * 1. Reject any command containing forbidden shell metacharacters
- * 2. Tokenize command into [bin, ...args]
- * 3. Match bin against allowlist
- * 4. Validate subcommand / arg pattern if defined
- * 5. Only pass if all checks pass
- */
-
 import { createLogger } from "../logger.js";
 
 const log = createLogger("executor:policy");
 
-// ─── Allowlist Schema ────────────────────────────────────────
+export type ExecPolicy = "strict" | "permissive";
 
 interface AllowedCommand {
-    /** The executable name (first token) */
     bin: string;
-    /** Allowed subcommands (second token must match one of these) */
     subcommands?: string[];
-    /** If specified, second token must also match this pattern */
-    argPattern?: RegExp;
-    /** If true, bin alone is valid (no subcommand required) */
     standalone?: boolean;
+    validate?: (tokens: string[], policy: ExecPolicy) => boolean;
+}
+
+/** Block shell injection / redirection / chaining */
+const FORBIDDEN_CHARS = /[;&|`$<>()[\]{}!\n\r\\]/;
+
+function tokenize(cmd: string): string[] {
+    return cmd.trim().split(/\s+/).filter(Boolean);
+}
+
+function isFlag(t: string) {
+    return t.startsWith("-");
+}
+
+function isSafeScriptName(name: string): boolean {
+    return /^[a-zA-Z0-9][a-zA-Z0-9:_-]*$/.test(name);
+}
+
+function isSafePkgSpecifier(spec: string): boolean {
+    // allow: pkg, @scope/pkg, pkg@1.2.3
+    // block: urls, file:, git+, ../, /abs
+    return /^(@?[\w.-]+\/)?[\w.-]+(@[\w.+-]+)?$/.test(spec);
+}
+
+function hasPkgInstallArg(tokens: string[]) {
+    return tokens.length >= 3 && !isFlag(tokens[2]!);
+}
+
+/** npm */
+function validateNpm(tokens: string[], policy: ExecPolicy): boolean {
+    const sub = tokens[1];
+    if (!sub) return false;
+
+    if (sub === "ci") return true;
+    if (sub === "test") return true;
+
+    if (sub === "run") {
+        const script = tokens[2];
+        if (!script) return false;
+        return isSafeScriptName(script);
+    }
+
+    if (sub === "install") {
+        if (policy === "strict") {
+            // strict: allow only "npm install" or "npm install --flags" (NO "npm install <pkg>")
+            return !hasPkgInstallArg(tokens);
+        }
+        // permissive: allow safe pkg spec
+        if (!hasPkgInstallArg(tokens)) return true;
+        return isSafePkgSpecifier(tokens[2]!);
+    }
+
+    return false;
+}
+
+function validatePipInstallArgs(tokens: string[], startIndex: number, policy: ExecPolicy): boolean {
+    if (policy !== "strict") return true;
+
+    for (let i = startIndex; i < tokens.length; i++) {
+        const t = tokens[i]!;
+        if (isFlag(t)) continue;
+        if (t === "." || t === "requirements.txt") continue;
+        if (!isSafePkgSpecifier(t)) return false;
+    }
+    return true;
+}
+
+/** python / python3 */
+function validatePython(tokens: string[], policy: ExecPolicy): boolean {
+    const sub = tokens[1];
+    if (sub !== "-m") return false;
+
+    const mod = tokens[2];
+    if (!mod) return false;
+
+    if (mod === "pytest") {
+        // python -m pytest ...
+        return true;
+    }
+
+    if (mod === "pip") {
+        // python -m pip install ...
+        const pipSub = tokens[3];
+        if (pipSub !== "install") return false;
+        return validatePipInstallArgs(tokens, 4, policy);
+    }
+
+    return false;
+}
+
+/** pip / pip3 */
+function validatePip(tokens: string[], policy: ExecPolicy): boolean {
+    const sub = tokens[1];
+    if (sub !== "install") return false;
+    return validatePipInstallArgs(tokens, 2, policy);
+}
+
+/** pytest standalone (gevşeklik) */
+function validatePytest(tokens: string[], policy: ExecPolicy): boolean {
+    // allow: pytest or pytest <file/args>
+    // already protected by forbidden chars + no shell operators
+    return true;
+}
+
+/** go */
+function validateGo(tokens: string[]): boolean {
+    const sub = tokens[1];
+    if (!sub) return false;
+    if (sub === "test") return true;
+    if (sub === "mod") return tokens[2] === "download";
+    return false;
+}
+
+/** rust */
+function validateCargo(tokens: string[]): boolean {
+    const sub = tokens[1];
+    return sub === "test" || sub === "fetch";
+}
+
+/** java */
+function validateMvn(tokens: string[]): boolean {
+    const sub = tokens[1];
+    return ["test", "verify", "package", "dependency:resolve"].includes(sub ?? "");
+}
+
+function validateGradle(tokens: string[]): boolean {
+    const sub = tokens[1];
+    return ["test", "build", "dependencies"].includes(sub ?? "");
+}
+
+/** git read-only */
+function validateGit(tokens: string[]): boolean {
+    const sub = tokens[1];
+    return ["status", "log", "diff", "branch"].includes(sub ?? "");
+}
+
+/** npx is risky */
+const NPX_SAFE_TOOLS = new Set(["eslint", "prettier", "tsc"]);
+function validateNpx(tokens: string[], policy: ExecPolicy): boolean {
+    if (policy === "strict") return false;
+    const tool = tokens[1];
+    if (!tool) return false;
+    if (!/^[\w@/.-]+$/.test(tool)) return false;
+    return NPX_SAFE_TOOLS.has(tool);
 }
 
 const ALLOWLIST: AllowedCommand[] = [
-    // Package managers
-    { bin: "npm", subcommands: ["ci", "install", "test", "run"] },
-    { bin: "pnpm", subcommands: ["install", "test", "run"] },
-    { bin: "yarn", subcommands: ["install", "test", "run"] },
-    { bin: "bun", subcommands: ["install", "test", "run"] },
-    { bin: "npx", argPattern: /^[\w@/.-]+$/ },
+    { bin: "npm", subcommands: ["ci", "install", "test", "run"], validate: validateNpm },
+    { bin: "pnpm", subcommands: ["install", "test", "run"], validate: () => true },
+    { bin: "yarn", subcommands: ["install", "test", "run"], validate: () => true },
+    { bin: "bun", subcommands: ["install", "test", "run"], validate: () => true },
+    { bin: "npx", validate: validateNpx },
 
     // Python
-    { bin: "pytest", standalone: true },
-    { bin: "python", subcommands: ["-m"], argPattern: /^pytest/ },
-    { bin: "pip", subcommands: ["install"] },
-    { bin: "pip3", subcommands: ["install"] },
-    { bin: "pipenv", subcommands: ["install"] },
+    { bin: "python", subcommands: ["-m"], validate: validatePython },
+    { bin: "python3", subcommands: ["-m"], validate: validatePython },
+    { bin: "pip", subcommands: ["install"], validate: validatePip },
+    { bin: "pip3", subcommands: ["install"], validate: validatePip },
+    { bin: "pytest", standalone: true, validate: validatePytest }, // ✅ allow pytest
 
     // Go
-    { bin: "go", subcommands: ["test", "mod"] },
+    { bin: "go", subcommands: ["test", "mod"], validate: (t) => validateGo(t) },
 
     // Java
-    { bin: "mvn", subcommands: ["test", "verify", "package", "dependency:resolve"] },
-    { bin: "gradle", subcommands: ["test", "build", "dependencies"] },
-    { bin: "./gradlew", subcommands: ["test", "build", "dependencies"] },
+    { bin: "mvn", subcommands: ["test", "verify", "package", "dependency:resolve"], validate: (t) => validateMvn(t) },
+    { bin: "gradle", subcommands: ["test", "build", "dependencies"], validate: (t) => validateGradle(t) },
+    { bin: "./gradlew", subcommands: ["test", "build", "dependencies"], validate: (t) => validateGradle(t) },
 
     // Rust
-    { bin: "cargo", subcommands: ["test", "fetch"] },
+    { bin: "cargo", subcommands: ["test", "fetch"], validate: (t) => validateCargo(t) },
 
     // .NET
-    { bin: "dotnet", subcommands: ["test"] },
+    { bin: "dotnet", subcommands: ["test"], validate: () => true },
 
-    // Build tools
-    { bin: "make", subcommands: ["test", "build", "check"] },
+    // Build
+    { bin: "make", subcommands: ["test", "build", "check"], validate: () => true },
 
-    // Safe read-only utilities
+    // Safe utilities
     { bin: "cat", standalone: true },
     { bin: "ls", standalone: true },
-    { bin: "echo", standalone: true },
     { bin: "pwd", standalone: true },
+    { bin: "echo", standalone: true },
 
-    // Git (read-only only — no push/commit)
-    { bin: "git", subcommands: ["status", "log", "diff", "branch"] },
+    // Git read-only
+    { bin: "git", subcommands: ["status", "log", "diff", "branch"], validate: (t) => validateGit(t) },
 ];
 
-/** Characters that MUST NEVER appear in any command — prevents shell injection */
-const FORBIDDEN_CHARS = /[;&|`$(){}!\n\r\\]/;
-
-export type ExecPolicy = "strict" | "permissive";
-
-// ─── Core Validation ─────────────────────────────────────────
-
-/**
- * Check if a command is allowed by the policy.
- *
- * Both strict and permissive modes now use the same allowlist.
- * The difference: permissive mode logs warnings instead of blocking
- * for commands that don't match the allowlist (but still rejects
- * forbidden characters).
- */
 export function isCommandAllowed(command: string, policy: ExecPolicy): boolean {
     const trimmed = command.trim();
     if (!trimmed) return false;
 
-    // Step 1: Reject forbidden shell metacharacters (both modes)
     if (FORBIDDEN_CHARS.test(trimmed)) {
         log.warn(`Command BLOCKED (forbidden characters): ${trimmed}`);
         return false;
     }
 
-    // Step 2: Tokenize
-    const tokens = trimmed.split(/\s+/);
+    const tokens = tokenize(trimmed);
+    if (tokens.length === 0) return false;
+
     const bin = tokens[0]!;
     const sub = tokens[1];
 
-    // Step 3: Match against allowlist
     const match = ALLOWLIST.find((a) => a.bin === bin);
-
     if (!match) {
-        if (policy === "permissive") {
-            log.warn(`Command ALLOWED (permissive, not in allowlist): ${trimmed}`);
-            return true;
+        if (policy === "strict") {
+            log.warn(`Command BLOCKED (not in allowlist): ${trimmed}`);
+            return false;
         }
-        log.warn(`Command BLOCKED (not in allowlist): ${trimmed}`);
-        return false;
+        // permissive mode: allow if no forbidden chars (already checked above)
+        log.info(`Command ALLOWED (permissive mode, no forbidden chars): ${trimmed}`);
+        return true;
     }
 
-    // Step 4: Standalone check
-    if (match.standalone && tokens.length <= 1) return true;
-    if (match.standalone && !match.subcommands) return true; // standalone with args OK
+    if (match.standalone) return true;
 
-    // Step 5: Subcommand check
     if (match.subcommands) {
         if (!sub || !match.subcommands.includes(sub)) {
-            if (policy === "permissive") {
-                log.warn(`Command ALLOWED (permissive, invalid subcommand '${sub ?? ""}'): ${trimmed}`);
-                return true;
+            if (policy === "strict") {
+                log.warn(`Command BLOCKED (invalid subcommand '${sub ?? ""}' for ${bin}): ${trimmed}`);
+                return false;
             }
-            log.warn(`Command BLOCKED (invalid subcommand '${sub ?? ""}' for ${bin}): ${trimmed}`);
-            return false;
+            // permissive mode: allow if no forbidden chars (already checked above)
+            log.info(`Command ALLOWED (permissive mode, no forbidden chars): ${trimmed}`);
+            return true;
         }
     }
 
-    // Step 6: Argument pattern check
-    if (match.argPattern) {
-        const argToCheck = match.subcommands ? tokens[2] : sub;
-        if (argToCheck && !match.argPattern.test(argToCheck)) {
-            if (policy === "permissive") {
-                log.warn(`Command ALLOWED (permissive, arg pattern mismatch for ${bin}): ${trimmed}`);
-                return true;
-            }
-            log.warn(`Command BLOCKED (argument pattern mismatch for ${bin}): ${trimmed}`);
+    if (match.validate && !match.validate(tokens, policy)) {
+        if (policy === "strict") {
+            log.warn(`Command BLOCKED (validator failed for ${bin}): ${trimmed}`);
             return false;
         }
+        // permissive mode: allow if no forbidden chars (already checked above)
+        log.info(`Command ALLOWED (permissive mode, no forbidden chars): ${trimmed}`);
+        return true;
     }
 
     return true;
 }
 
-// ─── Filter ──────────────────────────────────────────────────
-
-/** Filter and partition commands into allowed and blocked */
 export function filterCommands(
     commands: string[],
     policy: ExecPolicy,
@@ -153,11 +256,8 @@ export function filterCommands(
     const blocked: string[] = [];
 
     for (const cmd of commands) {
-        if (isCommandAllowed(cmd, policy)) {
-            allowed.push(cmd);
-        } else {
-            blocked.push(cmd);
-        }
+        if (isCommandAllowed(cmd, policy)) allowed.push(cmd);
+        else blocked.push(cmd);
     }
 
     return { allowed, blocked };

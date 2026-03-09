@@ -61,8 +61,8 @@ describe("Execution Policy", () => {
             expect(isCommandAllowed("node server.js", "permissive")).toBe(true);
             expect(isCommandAllowed("python setup.py install", "permissive")).toBe(true);
             expect(isCommandAllowed("npm test", "permissive")).toBe(true);
-            expect(isCommandAllowed("npm run test:report > test-results.txt", "permissive")).toBe(true);
-            expect(isCommandAllowed("cat < input.txt", "permissive")).toBe(true);
+            expect(isCommandAllowed("ruby script.rb", "permissive")).toBe(true);
+            expect(isCommandAllowed("java -jar app.jar", "permissive")).toBe(true);
         });
 
         it("should still block forbidden metacharacters", () => {

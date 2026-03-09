@@ -26,6 +26,7 @@ export interface Detection {
     confidence: Confidence;
     markers: string[];
     notes?: string[];
+    hasMultipleLanguages?: boolean;
 }
 
 // ─── Marker Registry ─────────────────────────────────────────
@@ -162,7 +163,8 @@ export function detectProject(
 
         // Log multi-language markers
         const languages = new Set(hits.map(h => h.rule.language));
-        if (languages.size > 1) {
+        const hasMultipleLanguages = languages.size > 1;
+        if (hasMultipleLanguages) {
             notes.push(`Multiple languages detected: ${[...languages].join(", ")} — using "${best.rule.language}" (highest priority)`);
             log.warn(`Multiple languages detected: ${[...languages].join(", ")} — using "${best.rule.language}"`);
         }
@@ -175,6 +177,7 @@ export function detectProject(
             confidence,
             markers: hits.map(h => h.path),
             notes: notes.length > 0 ? notes : undefined,
+            hasMultipleLanguages,
         };
 
         log.info(`selected: ${detection.language} (confidence=${detection.confidence}, image=${detection.image})`);
@@ -193,6 +196,7 @@ export function detectProject(
             confidence: "low",
             markers: [],
             notes,
+            hasMultipleLanguages: false,
         };
     }
 
@@ -205,6 +209,7 @@ export function detectProject(
         confidence: "low",
         markers: [],
         notes: ["No project markers found"],
+        hasMultipleLanguages: false,
     };
 }
 

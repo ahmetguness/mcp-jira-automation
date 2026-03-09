@@ -6,6 +6,7 @@
 import type { ScmProvider } from "../scm/index.js";
 import type { JiraIssue, TaskContext, ScmFile, RepoInfo } from "../types.js";
 import { createLogger } from "../logger.js";
+import { determineRuntime } from "../ai/runtimeSelector.js";
 
 const log = createLogger("pipeline:context");
 
@@ -97,11 +98,22 @@ export async function buildTaskContext(
 
     log.info(`Context built: ${sourceFiles.length} source, ${testFiles.length} test files`);
 
+    const runtimeSelection = determineRuntime(
+        mentionedFiles,
+        uniqueTests,
+        allFiles
+    );
+
+    log.info(`Detected runtime: ${runtimeSelection.primary} (isMulti: ${runtimeSelection.isMulti})`);
+
     return {
         issue,
         repo: repoInfo,
         sourceFiles,
         testFiles,
+        runtime: runtimeSelection.primary,
+        hasMultipleLanguages: runtimeSelection.isMulti,
+        runtimeSelection,
     };
 }
 

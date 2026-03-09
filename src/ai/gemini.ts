@@ -28,7 +28,7 @@ export class GeminiProvider implements AiProvider {
         const { result, duration_ms } = await withTiming(async () => {
             const model = this.genAI.getGenerativeModel({
                 model: this.model,
-                systemInstruction: buildSystemPrompt(),
+                systemInstruction: buildSystemPrompt({ primaryLanguage: context.runtime, isMulti: context.hasMultipleLanguages }),
                 generationConfig: {
                     temperature: 0.1,
                     responseMimeType: "application/json",

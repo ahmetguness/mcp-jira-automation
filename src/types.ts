@@ -29,6 +29,8 @@ export interface RepoInfo {
     description?: string;
 }
 
+import type { RuntimeSelectionResult } from "./ai/runtimeSelector.js";
+
 // ─── Pipeline Context ────────────────────────────────────────
 
 export interface TaskContext {
@@ -36,6 +38,9 @@ export interface TaskContext {
     repo: RepoInfo;
     sourceFiles: ScmFile[];
     testFiles: ScmFile[];
+    runtime?: string;
+    hasMultipleLanguages?: boolean;
+    runtimeSelection?: RuntimeSelectionResult;
 }
 
 // ─── AI ──────────────────────────────────────────────────────

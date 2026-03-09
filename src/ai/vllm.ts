@@ -37,7 +37,7 @@ export class VllmProvider implements AiProvider {
             const response = await this.client.chat.completions.create({
                 model: this.model,
                 messages: [
-                    { role: "system", content: buildSystemPrompt() },
+                    { role: "system", content: buildSystemPrompt({ primaryLanguage: context.runtime, isMulti: context.hasMultipleLanguages }) },
                     { role: "user", content: buildUserPrompt(context) },
                 ],
                 temperature: 0.1,

@@ -29,7 +29,7 @@ export class AnthropicProvider implements AiProvider {
             const response = await this.client.messages.create({
                 model: this.model,
                 max_tokens: 8192,
-                system: buildSystemPrompt(),
+                system: buildSystemPrompt({ primaryLanguage: context.runtime, isMulti: context.hasMultipleLanguages }),
                 messages: [
                     { role: "user", content: buildUserPrompt(context) },
                 ],

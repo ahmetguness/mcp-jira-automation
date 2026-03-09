@@ -24,7 +24,22 @@ describe("AI Provider Utilities", () => {
 
         it("should mention safety rules", () => {
             const prompt = buildSystemPrompt();
-            expect(prompt).toContain("Do NOT include destructive commands");
+            expect(prompt).toContain("SAFE commands only");
+        });
+
+        it("should include multi-language rules when requested", () => {
+            const prompt = buildSystemPrompt({ isMulti: true });
+            expect(prompt).toContain("MULTI-LANGUAGE REPOSITORY RULES");
+        });
+
+        it("should include specific overlay when primaryLanguage is provided", () => {
+            const prompt = buildSystemPrompt({ primaryLanguage: "python" });
+            expect(prompt).toContain("RUNTIME OVERLAY: Python");
+        });
+
+        it("should include unknown overlay by default", () => {
+            const prompt = buildSystemPrompt();
+            expect(prompt).toContain("RUNTIME OVERLAY: Unknown");
         });
     });
 
@@ -97,6 +112,27 @@ describe("AI Provider Utilities", () => {
             };
             const prompt = buildUserPrompt(context);
             expect(prompt).not.toContain("Description:");
+        });
+
+        it("should include Runtime Detection metadata when present", () => {
+            const context: TaskContext = {
+                ...baseContext,
+                runtimeSelection: {
+                    primary: "node",
+                    isMulti: true,
+                    markers: ["package.json", "requirements.txt"],
+                    detected: [
+                        { lang: "node", reason: "test", confidence: 0.8 },
+                        { lang: "python", reason: "test", confidence: 0.5 }
+                    ]
+                }
+            };
+            const prompt = buildUserPrompt(context);
+            expect(prompt).toContain("## Runtime Detection");
+            expect(prompt).toContain("primary_language: node");
+            expect(prompt).toContain("detected_languages: node(0.80), python(0.50)");
+            expect(prompt).toContain("marker_files: package.json, requirements.txt");
+            expect(prompt).toContain("multi_language_repo: true");
         });
     });
 
