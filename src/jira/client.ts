@@ -12,6 +12,8 @@ import { createLogger } from "../logger.js";
 const log = createLogger("jira:client");
 
 export class JiraClient {
+    private cachedRepoFieldId: string | null = null;
+
     constructor(
         private mcp: McpManager,
         private config: Config,
@@ -46,9 +48,52 @@ export class JiraClient {
         return this.parseIssue(result);
     }
 
+    /** Auto-detect repository custom field ID */
+    private async detectRepositoryFieldId(): Promise<string | null> {
+        if (this.cachedRepoFieldId) {
+            return this.cachedRepoFieldId;
+        }
+
+        try {
+            log.info("Auto-detecting repository custom field...");
+            
+            // Get all fields from Jira
+            const rawResult = await this.mcp.callJiraTool("jira_get_fields", {});
+            const fields = Array.isArray(rawResult) ? rawResult : [];
+
+            // Search for fields with "repository" or "repo" in name (case-insensitive)
+            const repoField = fields.find((field: any) => {
+                const name = (field.name || "").toLowerCase();
+                const id = field.id || "";
+                return (
+                    id.startsWith("customfield_") &&
+                    (name.includes("repository") || name.includes("repo"))
+                );
+            });
+
+            if (repoField) {
+                this.cachedRepoFieldId = repoField.id;
+                log.info(`Auto-detected repository field: ${repoField.name} (${repoField.id})`);
+                return repoField.id;
+            }
+
+            log.warn("No repository custom field found. Please create a custom field named 'Repository'");
+            return null;
+        } catch (error) {
+            log.warn(`Failed to auto-detect repository field: ${String(error)}`);
+            return null;
+        }
+    }
+
     /** Read the repository field from an issue */
     async getRepositoryField(issueKey: string): Promise<string | null> {
-        const fieldId = this.config.jiraRepoFieldId;
+        // Try configured field ID first
+        let fieldId = this.config.jiraRepoFieldId;
+
+        // If not configured, try auto-detection
+        if (!fieldId || fieldId === "customfield_XXXXX") {
+            fieldId = await this.detectRepositoryFieldId() || undefined;
+        }
 
         if (fieldId) {
             const rawResult = await this.mcp.callJiraTool("jira_get_issue", {
@@ -69,9 +114,12 @@ export class JiraClient {
         // Fallback: parse from description
         const issue = await this.getIssue(issueKey);
         const parsed = parseRepoFromDescription(issue.description);
-        if (parsed) return parsed;
+        if (parsed) {
+            log.info(`Repository found in description: ${parsed}`);
+            return parsed;
+        }
 
-        log.warn(`No repository found for ${issueKey}`);
+        log.warn(`No repository found for ${issueKey}. Add repository to description in format: "Repository: username/repo" or "https://github.com/username/repo"`);
         return null;
     }
 
@@ -153,16 +201,25 @@ function parseRepoFromDescription(description: string): string | null {
 
     // Match patterns like "Repo: org/repo" or "Repository: https://github.com/org/repo"
     const patterns = [
-        /Repo:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i,
-        /Repository:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i,
+        // Explicit patterns with labels
+        /(?:Repo|Repository):\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)/i,
         /(?:Repo|Repository):\s*(https?:\/\/[^\s]+)/i,
-        /(?:github|gitlab|bitbucket)\.(?:com|org)\/([^\s]+)/i,
+        
+        // GitHub/GitLab/Bitbucket URLs anywhere in text
+        /(?:github|gitlab|bitbucket)\.(?:com|org)\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)/i,
+        
+        // Standalone org/repo pattern (more permissive)
+        /\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)\b/,
     ];
 
     for (const pattern of patterns) {
         const match = description.match(pattern);
         if (match?.[1]) {
-            return normalizeRepoUrl(match[1]);
+            const normalized = normalizeRepoUrl(match[1]);
+            // Validate it looks like a real repo (has at least one slash)
+            if (normalized.includes('/')) {
+                return normalized;
+            }
         }
     }
 

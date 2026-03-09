@@ -5,13 +5,15 @@ export default tseslint.config(
     eslint.configs.recommended,
     ...tseslint.configs.recommendedTypeChecked,
     {
+        ignores: ["dist/**", "node_modules/**", "scripts/**"],
+    },
+    {
         languageOptions: {
             parserOptions: {
                 project: true,
                 tsconfigDirName: import.meta.dirname,
             },
         },
-        ignores: ["dist/**", "node_modules/**"],
         rules: {
             "@typescript-eslint/no-explicit-any": "error",
             "@typescript-eslint/no-unsafe-assignment": "off",

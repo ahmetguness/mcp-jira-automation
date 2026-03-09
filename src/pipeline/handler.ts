@@ -76,7 +76,7 @@ export class PipelineHandler {
             };
         }
 
-        log.info(`${issue.key} started (attempt ${attempt}/${maxAttempts})`, { issueKey: issue.key, step: "start" });
+        log.info(`📋 Processing ${issue.key}: "${issue.summary}" (attempt ${attempt}/${maxAttempts})`, { issueKey: issue.key, step: "start" });
 
         try {
             // Step 1: Get repository
@@ -95,10 +95,11 @@ export class PipelineHandler {
             }
 
             // Step 2: Build context
+            log.info(`📦 Fetching code from ${repo}...`, { issueKey: issue.key, step: "context" });
             const { result: context, duration_ms: contextMs } = await withTiming(() =>
                 buildTaskContext(issue, this.scm, repo),
             );
-            log.timed("info", `${issue.key} context built`, contextMs, {
+            log.timed("info", `✅ Context ready: ${context.sourceFiles.length} source files, ${context.testFiles.length} test files`, contextMs, {
                 issueKey: issue.key,
                 step: "context",
                 source: context.sourceFiles.length,
@@ -106,10 +107,11 @@ export class PipelineHandler {
             });
 
             // Step 3: AI analysis
+            log.info(`🤖 AI analyzing code...`, { issueKey: issue.key, step: "ai" });
             const { result: analysis, duration_ms: aiMs } = await withTiming(() =>
                 this.ai.analyze(context),
             );
-            log.timed("info", `${issue.key} ai analysis complete`, aiMs, {
+            log.timed("info", `✅ AI analysis complete: ${analysis.patches.length} file(s) to modify, ${analysis.commands.length} command(s) to run`, aiMs, {
                 issueKey: issue.key,
                 step: "ai",
                 patches: analysis.patches.length,
@@ -135,16 +137,27 @@ export class PipelineHandler {
             }
 
             // Step 4: Execute in Docker
+            log.info(`🐳 Running tests in isolated Docker container...`, { issueKey: issue.key, step: "exec" });
             const repoUrl = this.buildCloneUrl(repo);
             const { result: execution, duration_ms: execMs } = await withTiming(() =>
                 this.executor.execute(analysis, repoUrl, context.repo.defaultBranch)
             );
-            log.timed("info", `${issue.key} execution complete`, execMs, {
-                issueKey: issue.key,
-                step: "exec",
-                exitCode: execution.exitCode,
-                success: execution.success
-            });
+            
+            if (execution.success) {
+                log.timed("info", `✅ Tests passed successfully!`, execMs, {
+                    issueKey: issue.key,
+                    step: "exec",
+                    exitCode: execution.exitCode,
+                    success: true
+                });
+            } else {
+                log.timed("warn", `❌ Tests failed (exit code: ${execution.exitCode})`, execMs, {
+                    issueKey: issue.key,
+                    step: "exec",
+                    exitCode: execution.exitCode,
+                    success: false
+                });
+            }
 
             // Step 5: Create branch + PR (only if execution succeeded and there are patches)
             let prUrl: string | null = null;
@@ -155,13 +168,14 @@ export class PipelineHandler {
             ];
 
             if (execution.success && combinedPatches.length > 0) {
+                log.info(`🔀 Creating pull request...`, { issueKey: issue.key, step: "pr" });
                 const { result, duration_ms: prMs } = await withTiming(() =>
                     this.createBranchAndPr(issue, repo, analysis, combinedPatches, context.repo.defaultBranch)
                 );
                 prUrl = result;
-                log.timed("info", `${issue.key} pr created`, prMs, { issueKey: issue.key, step: "pr", prUrl });
+                log.timed("info", `✅ Pull request created: ${prUrl}`, prMs, { issueKey: issue.key, step: "pr", prUrl });
             } else if (!execution.success) {
-                log.warn(`${issue.key} skipping PR creation because execution failed (exit ${execution.exitCode})`, { issueKey: issue.key, step: "pr" });
+                log.warn(`⏭️  Skipping PR creation (tests failed)`, { issueKey: issue.key, step: "pr" });
             }
 
             // Step 6: Report to Jira
@@ -181,7 +195,7 @@ export class PipelineHandler {
             // Update state
             if (execution.success) {
                 this.state.markSuccess(issue.key, prUrl ?? undefined);
-                log.info(`${issue.key} finished successfully`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
+                log.info(`🎉 ${issue.key} completed successfully in ${Math.round(pipelineResult.duration_ms / 1000)}s`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
             } else {
                 this.handleFailureState(issue.key, `Exit code: ${execution.exitCode}`);
             }

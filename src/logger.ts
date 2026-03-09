@@ -87,9 +87,11 @@ const transportOptions = isJsonMode
         target: "pino-pretty",
         options: {
             colorize: true,
-            translateTime: "SYS:standard",
-            ignore: "pid,hostname,runId",
-            singleLine: true,
+            translateTime: "HH:MM:ss",
+            ignore: "pid,hostname,runId,scope",
+            singleLine: false,
+            messageFormat: "{scope} | {msg}",
+            customColors: "info:cyan,warn:yellow,error:red",
         },
     };
 

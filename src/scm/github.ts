@@ -13,14 +13,38 @@ const log = createLogger("scm:github");
 export class GitHubProvider implements ScmProvider {
     constructor(private mcp: McpManager) { }
 
-    // eslint-disable-next-line @typescript-eslint/require-await
     async getRepoInfo(repo: string): Promise<RepoInfo> {
-        // Repo doğrulamasını MCP ile yapmıyoruz.
-        // Çünkü bazı GitHub MCP server’larda "get_repository" tool’u yok.
-        // Repo yoksa zaten clone/fetch aşaması patlayacak.
+        const [owner, name] = this.parseRepo(repo);
+        
+        try {
+            // Try common branch names to detect default branch
+            // Try master first (more common for older repos), then main
+            const commonBranches = ["master", "main", "develop"];
+            for (const branch of commonBranches) {
+                try {
+                    await this.mcp.callScmTool("get_file_contents", {
+                        owner,
+                        repo: name,
+                        path: "",
+                        branch,
+                    });
+                    log.info(`Detected default branch: ${branch}`);
+                    return {
+                        name: repo,
+                        defaultBranch: branch,
+                    };
+                } catch {
+                    // Try next branch
+                }
+            }
+        } catch (e) {
+            log.warn(`Failed to detect default branch for ${repo}: ${String(e)}`);
+        }
+        
+        // Fallback to master (more common default)
         return {
             name: repo,
-            defaultBranch: "main",
+            defaultBranch: "master",
         };
     }
 
@@ -73,7 +97,7 @@ export class GitHubProvider implements ScmProvider {
 
     async createBranch(repo: string, branchName: string, baseBranch?: string): Promise<void> {
         const [owner, name] = this.parseRepo(repo);
-        const base = baseBranch ?? "main";
+        const base = baseBranch ?? "master";
 
         // (Optional warm-up) some servers require a read to ensure repo/branch exists
         await this.mcp.callScmTool("get_file_contents", {
@@ -120,7 +144,7 @@ export class GitHubProvider implements ScmProvider {
             title,
             body,
             head: sourceBranch,
-            base: targetBranch ?? "main",
+            base: targetBranch ?? "master",
         });
 
         /**

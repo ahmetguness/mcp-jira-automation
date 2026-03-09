@@ -35,7 +35,9 @@ ABSOLUTE CONSTRAINTS (NON-NEGOTIABLE)
 - Do NOT start long-running servers unless the issue explicitly demands it (and even then prefer in-process test clients).
 
 IMPORTANT ABOUT PACKAGE SCRIPTS
-- You may run repo-native test scripts (e.g. "npm test"), but you MUST NOT edit scripts to introduce shell operators.
+- You may run repo-native test scripts (e.g. "npm test", "npm run test"), but you MUST NOT edit scripts to introduce shell operators.
+- NEVER use "npm ci" or "npm install" as commands - dependencies are installed automatically by the system.
+- For Node.js projects, prefer "npm test" or specific test commands from package.json scripts.
 - If existing scripts internally contain shell operators and that causes execution limitations, explain it in "plan" instead of trying to rewrite scripts.
 
 5) No live network in tests
@@ -90,10 +92,14 @@ LOCKFILE / PACKAGE MANIFEST RULES (VERY IMPORTANT)
 COMMAND ORDER REQUIREMENT
 - If dependency install is needed, it MUST come first.
 - Verification/tests MUST be last.
+- If tests might start a server or hang, prefer quick validation commands (e.g., "node -c file.js" for syntax check).
+- Avoid long-running test commands that might timeout. Prefer unit tests over integration tests that start servers.
 
 AVOID DOUBLE-INSTALL / ENV BREAKAGE
-- If you propose a lockfile-based install (e.g. npm ci), you MUST NOT also run another install method (e.g. npm install).
-- Pick exactly one installer strategy.
+- Dependencies are automatically installed by the system before your commands run.
+- Do NOT include dependency installation commands (npm ci, npm install, pip install, etc.) in your commands array.
+- The system handles dependency installation automatically based on detected lockfiles/manifests.
+- Your commands should focus on running tests, linting, building, or other verification tasks only.
 
 VERIFICATION REPORT FILES (MD/TXT) — WITHOUT REDIRECTION OR SCRIPT CHANGES
 - If the Jira issue asks for an execution/verification report or human-readable summary:

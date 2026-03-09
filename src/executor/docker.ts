@@ -270,14 +270,35 @@ export class DockerExecutor {
                 allOutput.push(installResult.output);
 
                 if (installResult.exitCode !== 0) {
-                    log.error(`Dependency install failed (exit ${installResult.exitCode}): ${installCmd.join(" ")}`);
-                    return {
-                        exitCode: installResult.exitCode,
-                        stdout: allOutput.join("\n").slice(0, 50000),
-                        stderr: "Dependency installation failed",
-                    };
+                    // Fallback: If npm ci fails, retry with npm install
+                    if (installCmd[0] === "npm" && installCmd[1] === "ci") {
+                        log.warn(`npm ci failed (exit ${installResult.exitCode}), retrying with npm install...`);
+                        const fallbackCmd = ["npm", "install"];
+                        const fallbackInstallCmd = applyInstallScriptsPolicy(fallbackCmd, this.allowInstallScripts);
+                        
+                        const fallbackResult = await this.execInContainer(mainContainer, fallbackInstallCmd, mainWorkdir);
+                        allOutput.push(fallbackResult.output);
+
+                        if (fallbackResult.exitCode !== 0) {
+                            log.error(`Dependency install failed with fallback (exit ${fallbackResult.exitCode}): ${fallbackInstallCmd.join(" ")}`);
+                            return {
+                                exitCode: fallbackResult.exitCode,
+                                stdout: allOutput.join("\n").slice(0, 50000),
+                                stderr: "Dependency installation failed (both npm ci and npm install)",
+                            };
+                        }
+                        log.info("Dependencies installed successfully with npm install fallback");
+                    } else {
+                        log.error(`Dependency install failed (exit ${installResult.exitCode}): ${installCmd.join(" ")}`);
+                        return {
+                            exitCode: installResult.exitCode,
+                            stdout: allOutput.join("\n").slice(0, 50000),
+                            stderr: "Dependency installation failed",
+                        };
+                    }
+                } else {
+                    log.info("Dependencies installed successfully");
                 }
-                log.info("Dependencies installed successfully");
             }
 
             // Phase 4.2: Write patches via putArchive (tar stream)
