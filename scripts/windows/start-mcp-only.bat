@@ -11,9 +11,12 @@ echo.
 echo ============================================================
 echo.
 
-cd /d "%~dp0\.."
+cd /d "%~dp0\..\.."
 
 echo Starting MCP Atlassian server on port 9000...
+echo Using wrapper script for clean terminal handling...
 echo.
 
-powershell -NoExit -ExecutionPolicy Bypass -File "%~dp0start-mcp-atlassian.ps1"
+REM Use the wrapper script for better terminal handling
+REM Both scripts are in the same directory (scripts/windows/)
+call "%~dp0\start-mcp-wrapper.bat"

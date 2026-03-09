@@ -60,12 +60,14 @@ export function determineRuntime(
     if (mentionedFiles && mentionedFiles.length > 0) {
         for (const file of mentionedFiles) {
             const ext = getExtension(file);
-            if (ext && EXTENSION_MAP[ext]) {
-                addDetection(EXTENSION_MAP[ext] as Runtime, `Mentioned source file: ${file}`, 1.0);
+            const runtime = ext ? EXTENSION_MAP[ext] : undefined;
+            if (runtime) {
+                addDetection(runtime, `Mentioned source file: ${file}`, 1.0);
             }
             const basename = getBasename(file);
-            if (MARKER_MAP[basename]) {
-                addDetection(MARKER_MAP[basename] as Runtime, `Mentioned marker file: ${file}`, 1.0);
+            const markerRuntime = MARKER_MAP[basename];
+            if (markerRuntime) {
+                addDetection(markerRuntime, `Mentioned marker file: ${file}`, 1.0);
             }
         }
     }
@@ -74,8 +76,9 @@ export function determineRuntime(
     if (testFiles && testFiles.length > 0) {
         for (const file of testFiles) {
             const ext = getExtension(file);
-            if (ext && EXTENSION_MAP[ext]) {
-                addDetection(EXTENSION_MAP[ext] as Runtime, `Test file: ${file}`, 0.8);
+            const runtime = ext ? EXTENSION_MAP[ext] : undefined;
+            if (runtime) {
+                addDetection(runtime, `Test file: ${file}`, 0.8);
             }
         }
     }
@@ -84,12 +87,13 @@ export function determineRuntime(
     if (allFiles && allFiles.length > 0) {
         for (const file of allFiles) {
             const basename = getBasename(file);
-            if (MARKER_MAP[basename]) {
+            const runtime = MARKER_MAP[basename];
+            if (runtime) {
                 markers.push(file);
                 // Lower confidence for markers deep in the tree to prefer root markers
                 const depth = file.split('/').length - 1;
                 const confidence = depth === 0 ? 0.6 : Math.max(0.1, 0.6 - (depth * 0.1));
-                addDetection(MARKER_MAP[basename] as Runtime, `Marker file: ${file}`, confidence);
+                addDetection(runtime, `Marker file: ${file}`, confidence);
             }
         }
     }

@@ -7,7 +7,7 @@
 
 import OpenAI from "openai";
 import type { AiProvider } from "./provider.js";
-import { buildSystemPrompt, buildUserPrompt, parseAiResponse } from "./provider.js";
+import { buildSystemPrompt, buildUserPrompt, parseAiResponse, fixRouterDetection } from "./provider.js";
 import type { TaskContext, AiAnalysis } from "../types.js";
 import type { Config } from "../config.js";
 import { createLogger, withTiming } from "../logger.js";
@@ -47,6 +47,9 @@ export class VllmProvider implements AiProvider {
         });
 
         log.timed("info", `AI analysis complete for ${context.issue.key}`, duration_ms);
-        return parseAiResponse(result);
+        const analysis = parseAiResponse(result);
+        
+        // Post-process: Fix router detection issues in test files
+        return fixRouterDetection(analysis, context);
     }
 }

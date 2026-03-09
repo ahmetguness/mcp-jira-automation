@@ -74,7 +74,12 @@ MCP_SSE_URL=http://127.0.0.1:9000/sse
 ### Option 3: Manual Start
 
 ```bash
-mcp-atlassian --env-file mcp-atlassian.env --transport sse --port 9000 -vv
+# With environment file (recommended)
+mcp-atlassian --env-file mcp-atlassian.env --transport sse --port 9000
+
+# Note: Log verbosity is controlled by FASTMCP_LOG_LEVEL in mcp-atlassian.env
+# For troubleshooting, you can add -v or -vv flags:
+# mcp-atlassian --env-file mcp-atlassian.env --transport sse --port 9000 -vv
 ```
 
 ### With Docker Compose
@@ -124,25 +129,104 @@ pip install mcp-atlassian
 
 ### Too many logs (DEBUG logs)
 
-If you see logs like:
+If you see repetitive DEBUG logs like:
 ```
+DEBUG - docket.worker - Scheduling due tasks
 DEBUG - docket.worker - Getting redeliveries
 DEBUG - docket.worker - Getting new deliveries
 ```
 
-**Solution:** Open the `mcp-atlassian.env` file and make this change:
+These are internal FastMCP worker logs that can be suppressed.
+
+**Solution:** Open the `mcp-atlassian.env` file and configure logging:
 
 ```env
-# Old (too many logs):
-MCP_VERY_VERBOSE=true
+# =============================================
+# LOGGING CONFIGURATION (Recommended Settings)
+# =============================================
 
-# New (normal logs):
-MCP_VERBOSE=true
+# FastMCP Log Level - Controls internal MCP server logs
+# Set to ERROR to suppress verbose worker logs
+FASTMCP_LOG_LEVEL=ERROR
+
+# MCP Verbose Mode - Controls tool execution logs
+# Comment out both lines for minimal logging (recommended)
+# MCP_VERY_VERBOSE=true   # DEBUG level - very verbose
+# MCP_VERBOSE=true        # INFO level - shows operations
 ```
 
-Then restart MCP Atlassian.
+**Log Level Options:**
+- `FASTMCP_LOG_LEVEL=ERROR` - Only errors (recommended, cleanest output)
+- `FASTMCP_LOG_LEVEL=WARNING` - Errors and warnings
+- `FASTMCP_LOG_LEVEL=INFO` - Normal operations (moderate verbosity)
+- `FASTMCP_LOG_LEVEL=DEBUG` - All internal details (very verbose)
 
-## 📚 More Information
+After making changes, restart MCP Atlassian for the settings to take effect.
+
+### "TOOLSETS is not set" warning
+
+If you see this warning:
+```
+WARNING - TOOLSETS is not set — currently defaults to all toolsets. 
+In v0.22.0, the default will change to 6 core toolsets only.
+```
+
+**Solution:** Open `mcp-atlassian.env` and explicitly set:
+
+```env
+# Enable all available toolsets (recommended)
+TOOLSETS=all
+```
+
+**Toolset Options:**
+- `all` - All available toolsets (recommended for full functionality)
+- `default` - 6 core toolsets only (minimal set)
+- `jira` - Jira-specific tools only
+- `confluence` - Confluence-specific tools only
+- `jira-admin` - Jira admin tools
+- `confluence-admin` - Confluence admin tools
+
+After making changes, restart MCP Atlassian.
+
+### Terminal becomes unresponsive after Ctrl+C
+
+If your terminal becomes unresponsive or stops showing typed characters after stopping MCP Atlassian with Ctrl+C:
+
+**Immediate Fix (Type blindly - you won't see it):**
+```bash
+# Windows PowerShell:
+[Console]::ResetColor(); cls
+
+# Windows CMD:
+cls
+
+# Unix/Linux/Mac:
+reset
+stty sane
+```
+
+**Recommended Solution - Use Batch File (Windows):**
+```bash
+# Use the wrapper script that handles cleanup properly:
+.\scripts\windows\start-mcp-wrapper.bat
+```
+
+This batch file wrapper ensures clean terminal shutdown even after Ctrl+C.
+
+**Alternative - Run in Separate Window:**
+```bash
+# Windows - Opens in new window that can be closed safely:
+start powershell -NoExit -File .\scripts\windows\start-mcp-atlassian.ps1
+
+# Or use the batch wrapper in new window:
+start cmd /k .\scripts\windows\start-mcp-wrapper.bat
+```
+
+**Why this happens:**
+Python applications (including mcp-atlassian) can change terminal settings (like echo mode) and may not restore them properly when interrupted with Ctrl+C. The wrapper scripts attempt to restore terminal state, but the most reliable solution is running in a separate window that can be closed.
+
+**Best Practice:**
+Run MCP Atlassian in a dedicated terminal window that you can close when done, rather than using Ctrl+C in your main working terminal.
 
 - [MCP Atlassian GitHub](https://github.com/sooperset/mcp-atlassian)
 - [Jira API Documentation](https://developer.atlassian.com/cloud/jira/platform/rest/v3/)

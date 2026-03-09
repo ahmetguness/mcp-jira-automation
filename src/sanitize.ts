@@ -61,7 +61,7 @@ export function validateRepoUrl(url: string): string {
     } catch (e) {
         if (e instanceof Error && e.message.startsWith("Invalid repo URL")) throw e;
         log.error(`Invalid repository URL rejected: ${trimmed.slice(0, 80)}`);
-        throw new Error(`Invalid repository URL format`);
+        throw new Error(`Invalid repository URL format`, { cause: e });
     }
 }
 

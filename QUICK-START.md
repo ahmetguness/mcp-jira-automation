@@ -31,8 +31,16 @@ npm run build
 .\scripts\start-all.bat
 
 # Or start components separately
-.\scripts\start-mcp-only.bat    # MCP Atlassian only
+.\scripts\start-mcp-only.bat    # MCP Atlassian only (uses wrapper for clean shutdown)
 .\scripts\start-app-only.bat    # Main app only
+
+# Alternative: Use wrapper for better terminal handling
+.\scripts\windows\start-mcp-wrapper.bat  # Prevents terminal corruption on Ctrl+C
+```
+
+**Note:** If your terminal becomes unresponsive after stopping MCP with Ctrl+C, use the wrapper script or run in a separate window:
+```bash
+start cmd /k .\scripts\windows\start-mcp-wrapper.bat
 ```
 
 ### Linux/Mac

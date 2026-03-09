@@ -62,19 +62,27 @@ export class JiraClient {
             const fields = Array.isArray(rawResult) ? rawResult : [];
 
             // Search for fields with "repository" or "repo" in name (case-insensitive)
-            const repoField = fields.find((field: any) => {
-                const name = (field.name || "").toLowerCase();
-                const id = field.id || "";
+            const repoField = fields.find((field: unknown) => {
+                if (!field || typeof field !== 'object') return false;
+                const fieldObj = field as Record<string, unknown>;
+                const name = typeof fieldObj.name === 'string' ? fieldObj.name.toLowerCase() : '';
+                const id = typeof fieldObj.id === 'string' ? fieldObj.id : '';
                 return (
                     id.startsWith("customfield_") &&
                     (name.includes("repository") || name.includes("repo"))
                 );
             });
 
-            if (repoField) {
-                this.cachedRepoFieldId = repoField.id;
-                log.info(`Auto-detected repository field: ${repoField.name} (${repoField.id})`);
-                return repoField.id;
+            if (repoField && typeof repoField === 'object') {
+                const fieldObj = repoField as Record<string, unknown>;
+                const fieldId = typeof fieldObj.id === 'string' ? fieldObj.id : null;
+                const fieldName = typeof fieldObj.name === 'string' ? fieldObj.name : 'Unknown';
+                
+                if (fieldId) {
+                    this.cachedRepoFieldId = fieldId;
+                    log.info(`Auto-detected repository field: ${fieldName} (${fieldId})`);
+                    return fieldId;
+                }
             }
 
             log.warn("No repository custom field found. Please create a custom field named 'Repository'");

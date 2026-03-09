@@ -7,3 +7,7 @@ mcp-atlassian.env
 BASIT_KULLANIM.md
 .kiro
 notes.txt
+
+# Prevent compiled JavaScript files in source directory
+src/**/*.js
+src/**/*.js.map

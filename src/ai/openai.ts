@@ -4,7 +4,7 @@
 
 import OpenAI from "openai";
 import type { AiProvider } from "./provider.js";
-import { buildSystemPrompt, buildUserPrompt, parseAiResponse } from "./provider.js";
+import { buildSystemPrompt, buildUserPrompt, parseAiResponse, fixRouterDetection } from "./provider.js";
 import type { TaskContext, AiAnalysis } from "../types.js";
 import type { Config } from "../config.js";
 import { createLogger, withTiming } from "../logger.js";
@@ -26,13 +26,16 @@ export class OpenAiProvider implements AiProvider {
         log.info(`Analyzing issue ${context.issue.key}...`);
 
         const { result, duration_ms } = await withTiming(async () => {
+            // gpt-5-mini only supports temperature=1 (default)
+            const temperature = this.model.includes('gpt-5') ? 1 : 0.1;
+            
             const response = await this.client.chat.completions.create({
                 model: this.model,
                 messages: [
                     { role: "system", content: buildSystemPrompt({ primaryLanguage: context.runtime, isMulti: context.hasMultipleLanguages }) },
                     { role: "user", content: buildUserPrompt(context) },
                 ],
-                temperature: 0.1,
+                temperature,
                 response_format: { type: "json_object" },
             });
 
@@ -40,6 +43,9 @@ export class OpenAiProvider implements AiProvider {
         });
 
         log.timed("info", `AI analysis complete for ${context.issue.key}`, duration_ms);
-        return parseAiResponse(result);
+        const analysis = parseAiResponse(result);
+        
+        // Post-process: Fix router detection issues in test files
+        return fixRouterDetection(analysis, context);
     }
 }

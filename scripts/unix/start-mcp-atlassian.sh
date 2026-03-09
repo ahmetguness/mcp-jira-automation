@@ -43,11 +43,33 @@ fi
 echo -e "${GREEN}Starting MCP Atlassian server on port 9000...${NC}"
 echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
 echo ""
+echo -e "${NC}Note: Verbose logging is controlled by FASTMCP_LOG_LEVEL in mcp-atlassian.env${NC}"
+echo ""
 
-# Start the server
-npx -y @modelcontextprotocol/server-atlassian || {
+# Function to restore terminal on exit
+restore_terminal() {
+    echo ""
+    echo -e "${YELLOW}Shutting down MCP Atlassian server...${NC}"
+    
+    # Restore terminal settings
+    stty sane 2>/dev/null || true
+    
+    # Reset terminal
+    reset 2>/dev/null || tput reset 2>/dev/null || true
+    
+    echo -e "${GREEN}Terminal restored${NC}"
+    exit 0
+}
+
+# Trap Ctrl+C (SIGINT) and other termination signals
+trap restore_terminal SIGINT SIGTERM EXIT
+
+# Start the server using Python package
+mcp-atlassian --env-file mcp-atlassian.env --transport sse --port 9000 || {
     echo ""
     echo -e "${RED}ERROR: Failed to start MCP Atlassian server${NC}"
+    echo -e "${YELLOW}Make sure mcp-atlassian is installed:${NC}"
+    echo -e "${YELLOW}  pip install mcp-atlassian${NC}"
     echo ""
     read -p "Press Enter to exit..."
     exit 1

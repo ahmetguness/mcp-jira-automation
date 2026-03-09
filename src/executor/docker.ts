@@ -17,7 +17,7 @@
 import Docker from "dockerode";
 import { PassThrough } from "node:stream";
 import { pack, type Pack } from "tar-stream";
-import { createLogger, withTiming } from "../logger.js";
+import { createLogger } from "../logger.js";
 import type { Config } from "../config.js";
 import { validateBranchName, validateRepoUrl, validatePatchPath } from "../sanitize.js";
 import {
@@ -105,11 +105,11 @@ export class DockerExecutor {
         try {
             log.debug(`Checking if image ${imageName} exists locally...`);
             await this.docker.getImage(imageName).inspect();
-        } catch (e: any) {
-            if (e.statusCode === 404) {
+        } catch (e: unknown) {
+            if (e && typeof e === 'object' && 'statusCode' in e && e.statusCode === 404) {
                 log.info(`Image ${imageName} not found locally. Pulling...`);
                 await new Promise<void>((resolve, reject) => {
-                    this.docker.pull(imageName, (err: Error | null, stream: NodeJS.ReadableStream) => {
+                    void this.docker.pull(imageName, (err: Error | null, stream: NodeJS.ReadableStream) => {
                         if (err) return reject(err);
                         this.docker.modem.followProgress(stream, (onFinishedErr: Error | null) => {
                             if (onFinishedErr) return reject(onFinishedErr);
@@ -318,6 +318,11 @@ export class DockerExecutor {
 
                 if (result.exitCode !== 0) {
                     log.error(`Command failed (exit ${result.exitCode}): ${cmd}`);
+                    // Log stdout/stderr for debugging
+                    if (result.output) {
+                        const lines = result.output.split('\n').slice(0, 20); // First 20 lines
+                        log.error(`Command output:\n${lines.join('\n')}`);
+                    }
                     break;
                 }
             }

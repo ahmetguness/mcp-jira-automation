@@ -174,3 +174,77 @@ export function parseAiResponse(text: string): AiAnalysis {
     };
   }
 }
+
+/**
+ * Post-process AI analysis to fix common router detection issues.
+ * If AI generated test code that calls app.listen() but source exports a router,
+ * automatically fix it to use http.createServer(router).
+ */
+export function fixRouterDetection(analysis: AiAnalysis, context: TaskContext): AiAnalysis {
+  // Check if any source file exports a router
+  const hasRouterExport = context.sourceFiles.some(f => {
+    const content = f.content.toLowerCase();
+    return (
+      (content.includes('express.router()') || content.includes('router()')) &&
+      (content.includes('module.exports') || content.includes('export default') || content.includes('export {'))
+    );
+  });
+
+  if (!hasRouterExport) {
+    return analysis; // No router detected, return as-is
+  }
+
+  // Fix test patches that incorrectly use app.listen()
+  const fixedPatches = analysis.patches.map(patch => {
+    // Only process test files
+    if (!patch.path.match(/test.*\.js$/i) && !patch.action) {
+      return patch;
+    }
+
+    const content = patch.content;
+    
+    // Check if test uses app.listen() or router.listen() pattern (the bug)
+    const hasListenBug = (content.includes('.listen(') && !content.includes('http.createServer('));
+    
+    if (hasListenBug) {
+      let fixedContent = content;
+      
+      // Pattern 1: const server = app.listen(port); or const server = router.listen(port);
+      fixedContent = fixedContent.replace(
+        /const\s+server\s*=\s*(\w+)\.listen\((\d+)\);/g,
+        (match, varName, port) => {
+          return `const server = http.createServer(${varName});\nserver.listen(${port});`;
+        }
+      );
+      
+      // Pattern 2: app.listen(port) or router.listen(port) without assignment
+      fixedContent = fixedContent.replace(
+        /(\w+)\.listen\((\d+)\);/g,
+        (match, varName, port) => {
+          return `const server = http.createServer(${varName});\nserver.listen(${port});`;
+        }
+      );
+      
+      // Ensure http module is imported if not already
+      if (!fixedContent.includes("require('http')") && !fixedContent.includes('require("http")')) {
+        // Find the first require statement
+        const requireMatch = fixedContent.match(/const\s+\w+\s*=\s*require\([^)]+\);/);
+        if (requireMatch) {
+          const insertPos = fixedContent.indexOf(requireMatch[0]) + requireMatch[0].length;
+          fixedContent = fixedContent.slice(0, insertPos) + 
+                       "\nconst http = require('http');" + 
+                       fixedContent.slice(insertPos);
+        } else {
+          // No require found, add at the top
+          fixedContent = "const http = require('http');\n" + fixedContent;
+        }
+      }
+      
+      return { ...patch, content: fixedContent };
+    }
+    
+    return patch;
+  });
+
+  return { ...analysis, patches: fixedPatches };
+}

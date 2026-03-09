@@ -63,7 +63,28 @@ if (!scriptMap[platform][command as ScriptCommand]) {
   process.exit(1);
 }
 
-const scriptPath = join(__dirname, scriptMap[platform][command as ScriptCommand]);
+// Find project root by looking for package.json
+import { existsSync } from 'fs';
+
+function findProjectRoot(startDir: string): string {
+  let currentDir = startDir;
+  
+  // Go up max 5 levels to find package.json
+  for (let i = 0; i < 5; i++) {
+    if (existsSync(join(currentDir, 'package.json'))) {
+      return currentDir;
+    }
+    const parentDir = join(currentDir, '..');
+    if (parentDir === currentDir) break; // Reached root
+    currentDir = parentDir;
+  }
+  
+  // Fallback to cwd
+  return process.cwd();
+}
+
+const projectRoot = findProjectRoot(process.cwd());
+const scriptPath = join(projectRoot, 'scripts', scriptMap[platform][command as ScriptCommand]);
 
 console.log(`🚀 Starting ${command} on ${platform}...`);
 console.log(`📂 Script: ${scriptPath}\n`);
@@ -73,7 +94,7 @@ const args = isWindows ? ['/c', scriptPath] : [scriptPath];
 
 const child = spawn(shell, args, {
   stdio: 'inherit',
-  cwd: join(__dirname, '..')
+  cwd: projectRoot
 });
 
 child.on('error', (error: Error) => {

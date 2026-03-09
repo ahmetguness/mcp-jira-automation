@@ -54,7 +54,7 @@ const configSchema = z.object({
     requireApproval: z.coerce.boolean().default(false),
 
     // Logging
-    logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
+    logLevel: z.enum(["debug", "info", "warn", "error", "silent"]).default("info"),
 
     // State
     stateFile: z.string().default("./data/state.json"),

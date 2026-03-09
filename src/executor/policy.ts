@@ -106,7 +106,7 @@ function validatePip(tokens: string[], policy: ExecPolicy): boolean {
 }
 
 /** pytest standalone (gevşeklik) */
-function validatePytest(tokens: string[], policy: ExecPolicy): boolean {
+function validatePytest(_tokens: string[], _policy: ExecPolicy): boolean {
     // allow: pytest or pytest <file/args>
     // already protected by forbidden chars + no shell operators
     return true;
@@ -160,6 +160,10 @@ const ALLOWLIST: AllowedCommand[] = [
     { bin: "yarn", subcommands: ["install", "test", "run"], validate: () => true },
     { bin: "bun", subcommands: ["install", "test", "run"], validate: () => true },
     { bin: "npx", validate: validateNpx },
+    
+    // Node.js direct execution - removed standalone flag to enforce strict mode blocking
+    // In strict mode, node commands with arguments should be blocked
+    // In permissive mode, they are allowed (no forbidden chars check passes)
 
     // Python
     { bin: "python", subcommands: ["-m"], validate: validatePython },
@@ -221,7 +225,19 @@ export function isCommandAllowed(command: string, policy: ExecPolicy): boolean {
         return true;
     }
 
-    if (match.standalone) return true;
+    if (match.standalone) {
+        // In strict mode, standalone only applies to simple utilities
+        // This prevents commands like "node server.js" from bypassing strict mode checks
+        if (policy === "strict") {
+            // Allow simple utilities: cat, ls, pwd, echo, pytest
+            const simpleUtils = ["cat", "ls", "pwd", "echo", "pytest"];
+            if (!simpleUtils.includes(bin)) {
+                log.warn(`Command BLOCKED (standalone binary '${bin}' not allowed in strict mode): ${trimmed}`);
+                return false;
+            }
+        }
+        return true;
+    }
 
     if (match.subcommands) {
         if (!sub || !match.subcommands.includes(sub)) {

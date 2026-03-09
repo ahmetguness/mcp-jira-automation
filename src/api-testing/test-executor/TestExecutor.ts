@@ -392,21 +392,23 @@ export class TestExecutor {
    * Requirement 7.5: Pass credentials as environment variables only
    */
   private buildEnvironmentVariables(config: ExecutionConfig): string[] {
-    const envVars: string[] = [
-      'DEBIAN_FRONTEND=noninteractive',
-      'HOME=/root',
-      'NO_COLOR=1',
-      'FORCE_COLOR=0',
-    ];
+      const envVars: string[] = [
+        'DEBIAN_FRONTEND=noninteractive',
+        'HOME=/root',
+        'NO_COLOR=1',
+        'FORCE_COLOR=0',
+        'NODE_ENV=test',
+      ];
 
-    // Add credentials as environment variables
-    // Requirement 7.2: Credentials are never logged (redaction happens in logging)
-    for (const [key, value] of Object.entries(config.credentials)) {
-      envVars.push(`${key}=${value}`);
+      // Add credentials as environment variables
+      // Requirement 7.2: Credentials are never logged (redaction happens in logging)
+      for (const [key, value] of Object.entries(config.credentials)) {
+        envVars.push(`${key}=${value}`);
+      }
+
+      return envVars;
     }
 
-    return envVars;
-  }
 
   /**
    * Clear credentials from memory

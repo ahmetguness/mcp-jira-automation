@@ -5,7 +5,7 @@
 import { pino } from "pino";
 import crypto from "node:crypto";
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
 
 export interface LogContext {
     runId?: string;
@@ -100,6 +100,8 @@ export const baseLogger = pino({
     timestamp: pino.stdTimeFunctions.isoTime,
     base: { runId: RUN_ID },
     transport: transportOptions,
+    // Suppress all logs when LOG_LEVEL is "silent"
+    enabled: process.env.LOG_LEVEL !== "silent",
 });
 
 /**
