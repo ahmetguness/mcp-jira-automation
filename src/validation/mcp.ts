@@ -5,6 +5,7 @@
 import { z } from "zod";
 
 export const ZodMcpToolResult = z.object({
+    isError: z.boolean().optional(),
     structuredContent: z.object({
         result: z.unknown()
     }).catchall(z.unknown()).optional(),

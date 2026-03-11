@@ -112,7 +112,13 @@ export class McpManager {
         // - If extracted is a JSON string, parse it
         // - If it's already structured, keep it
         // - If it's plain text, return it
-        return unwrapMcpResult(extracted);
+        const finalResult = unwrapMcpResult(extracted);
+
+        if (result.isError) {
+            throw new Error(`Tool ${connection.name}/${name} failed: ${typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult)}`);
+        }
+
+        return finalResult;
     }
 
     /** Call a Jira tool */
