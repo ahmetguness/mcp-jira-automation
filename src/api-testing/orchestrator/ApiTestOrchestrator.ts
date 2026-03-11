@@ -23,7 +23,14 @@ import { JiraListener, type JiraListenerConfig } from '../jira-listener/JiraList
 import { EndpointParser } from '../endpoint-parser/EndpointParser.js';
 import { RepositoryResolver, type RepositoryResolverConfig } from '../repository-resolver/RepositoryResolver.js';
 import { ApprovalManager } from '../approval-manager/ApprovalManager.js';
+import { TestScriptGenerator } from '../test-script-generator/TestScriptGenerator.js';
+import { TestExecutor } from '../test-executor/TestExecutor.js';
+import { TestReporter } from '../test-reporter/TestReporter.js';
+import { ContextRetrieval } from '../context-retrieval/ContextRetrieval.js';
+import { SpecDetector } from '../specification/SpecDetector.js';
+import { TestStrategyManager, type TestPlan } from '../strategy/TestStrategyManager.js';
 import { createLogger } from '../../logger.js';
+import type { Config } from '../../config.js';
 
 const log = createLogger('api-testing:orchestrator');
 
@@ -51,6 +58,9 @@ export interface OrchestratorConfig {
   
   /** Polling interval in seconds (default: 60) */
   pollingIntervalSeconds?: number;
+
+  /** Global app config */
+  appConfig: Config;
 }
 
 /**
@@ -99,6 +109,12 @@ export class ApiTestOrchestrator {
   private endpointParser: EndpointParser;
   private repositoryResolver: RepositoryResolver;
   private approvalManager: ApprovalManager;
+  private testScriptGenerator: TestScriptGenerator;
+  private testExecutor: TestExecutor;
+  private testReporter: TestReporter;
+  private contextRetrieval: ContextRetrieval;
+  private specDetector: SpecDetector;
+  private strategyManager: TestStrategyManager;
   private isRunning: boolean = false;
 
   constructor(config: OrchestratorConfig) {
@@ -108,6 +124,19 @@ export class ApiTestOrchestrator {
     this.jiraListener = new JiraListener(config.jira);
     this.endpointParser = new EndpointParser();
     this.repositoryResolver = new RepositoryResolver(config.repository);
+    
+    this.testScriptGenerator = new TestScriptGenerator(config.appConfig);
+    this.testExecutor = new TestExecutor();
+    this.testReporter = new TestReporter({
+      jiraBaseUrl: config.jira.jiraBaseUrl,
+      jiraEmail: config.jira.jiraEmail,
+      jiraApiToken: config.jira.jiraApiToken,
+      scmProvider: undefined // Will be set in app.ts if SCM exists
+    });
+
+    this.contextRetrieval = new ContextRetrieval();
+    this.specDetector = new SpecDetector();
+    this.strategyManager = new TestStrategyManager();
     
     // Initialize approval manager
     this.approvalManager = new ApprovalManager({
@@ -218,18 +247,23 @@ export class ApiTestOrchestrator {
       const repository = this.resolveRepository(task);
       log.info(`[${task.key}] Resolved repository: ${repository.url}`);
 
-      // Stage 4: Retrieve context (placeholder)
+      // Stage 4: Retrieve context
       currentStage = PipelineStage.CONTEXT_RETRIEVAL;
       log.debug(`[${task.key}] Stage: Retrieving context`);
       
-      const context = this.retrieveContext(repository, parseResult.endpoints);
+      const context = await this.retrieveContext(repository, parseResult.endpoints);
       log.info(`[${task.key}] Retrieved context: ${context.apiSpecifications.length} API specs, ${context.existingTests.length} existing tests`);
 
-      // Stage 5: Generate tests (placeholder)
+      // Stage 4.5: Construct test plan
+      log.debug(`[${task.key}] Stage: Constructing test plan`);
+      const discoveredSpecs = this.specDetector.parseSpecifications(context.apiSpecifications);
+      const testPlan = this.strategyManager.generateTestPlan(parseResult.endpoints, discoveredSpecs, context);
+
+      // Stage 5: Generate tests
       currentStage = PipelineStage.TEST_GENERATION;
       log.debug(`[${task.key}] Stage: Generating tests`);
       
-      const generatedTests = this.generateTests(context, parseResult.endpoints);
+      const generatedTests = await this.generateTests(context, testPlan);
       log.info(`[${task.key}] Generated ${generatedTests.testFiles.length} test file(s)`);
 
       // Stage 5.5: Request approval if required
@@ -253,18 +287,18 @@ export class ApiTestOrchestrator {
         log.info(`[${task.key}] Approval not required, proceeding with test execution`);
       }
 
-      // Stage 6: Execute tests (placeholder)
+      // Stage 6: Execute tests
       currentStage = PipelineStage.TEST_EXECUTION;
       log.debug(`[${task.key}] Stage: Executing tests`);
       
-      const testResults = this.executeTests(generatedTests, repository);
+      const testResults = await this.executeTests(generatedTests, repository);
       log.info(`[${task.key}] Tests executed: ${testResults.passedTests}/${testResults.totalTests} passed`);
 
-      // Stage 7: Report results (placeholder)
+      // Stage 7: Report results
       currentStage = PipelineStage.REPORTING;
       log.debug(`[${task.key}] Stage: Reporting results`);
       
-      this.reportResults(task, testResults, generatedTests, repository);
+      await this.reportResults(task, testResults, generatedTests, repository);
       log.info(`[${task.key}] Results reported to Jira and SCM`);
 
       // Pipeline completed successfully
@@ -337,90 +371,87 @@ export class ApiTestOrchestrator {
   }
 
   /**
-   * Retrieve context from repository (placeholder)
+   * Retrieve context from repository
    * Requirements: 11.2 - Only retrieve test-relevant files
-   * 
-   * TODO: Implement using ContextRetrieval module
    */
-  private retrieveContext(
+  private async retrieveContext(
     _repository: RepositoryInfo,
     _endpoints: EndpointSpec[]
-  ): TestContext {
-    log.warn('Context retrieval not yet implemented - using placeholder');
-    
-    // Placeholder: Return empty context
-    return {
-      apiSpecifications: [],
-      existingTests: [],
-      documentation: [],
-      configurationFiles: [],
-      repositoryInfo: _repository,
-    };
+  ): Promise<TestContext> {
+    log.info('Retrieving relevant files from repository...');
+    return await this.contextRetrieval.retrieveContext(_repository, _endpoints);
   }
 
   /**
-   * Generate test scripts (placeholder)
+   * Generate test scripts
    * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7
-   * 
-   * TODO: Implement using TestScriptGenerator module
    */
-  private generateTests(
+  private async generateTests(
     _context: TestContext,
-    _endpoints: EndpointSpec[]
-  ): GeneratedTests {
-    log.warn('Test generation not yet implemented - using placeholder');
+    _testPlan: TestPlan
+  ): Promise<GeneratedTests> {
+    log.info('Generating tests...');
     
-    // Placeholder: Return empty test generation result
-    return {
-      testFiles: [],
-      framework: _context.detectedFramework ?? TestFramework.PYTEST_REQUESTS,
-      requiredEnvVars: ['API_BASE_URL', 'API_TOKEN'],
-      setupCommands: ['pip install -r requirements.txt'],
-      runCommand: 'pytest tests/api/ -v',
-      warnings: ['Test generation not yet implemented'],
-    };
+    // Select framework
+    const framework = this.testScriptGenerator.selectFramework(_context);
+
+    // Call actual generator
+    return await this.testScriptGenerator.generateTests(_context, _testPlan, framework);
   }
 
   /**
-   * Execute tests in Docker container (placeholder)
+   * Execute tests in Docker container
    * Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
-   * 
-   * TODO: Implement using TestExecutor module
    */
-  private executeTests(
+  private async executeTests(
     _generatedTests: GeneratedTests,
     _repository: RepositoryInfo
-  ): TestResults {
-    log.warn('Test execution not yet implemented - using placeholder');
+  ): Promise<TestResults> {
+    log.info('Executing tests...');
     
-    // Placeholder: Return mock test results
-    return {
-      totalTests: 0,
-      passedTests: 0,
-      failedTests: 0,
-      skippedTests: 0,
-      durationSeconds: 0,
-      testCases: [],
-      timestamp: new Date(),
+    // Convert to ExecutionConfig which requires credentials object
+    // You should dynamically build credentials mapping here
+    const executionConfig: ExecutionConfig = {
+      ...this.config.execution,
+      environment: this.config.execution?.environment ?? ('staging' as any),
+      credentials: {}, // Need logic to map requiredEnvVars to CredentialManager/Secrets
+      timeoutSeconds: this.config.execution?.timeoutSeconds ?? 300,
+      retryCount: this.config.execution?.retryCount ?? 0,
+      retryBackoffSeconds: this.config.execution?.retryBackoffSeconds ?? [1, 2, 4],
+      allowDestructiveOps: this.config.execution?.allowDestructiveOps ?? false,
     };
+
+    return await this.testExecutor.executeTests(_generatedTests, executionConfig);
   }
 
   /**
-   * Report results to Jira and SCM (placeholder)
+   * Report results to Jira and SCM
    * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
-   * 
-   * TODO: Implement using TestReporter module
    */
-  private reportResults(
+  private async reportResults(
     _task: JiraTask,
     _testResults: TestResults,
     _generatedTests: GeneratedTests,
     _repository: RepositoryInfo
-  ): void {
-    log.warn('Result reporting not yet implemented - using placeholder');
+  ): Promise<void> {
+    log.info(`Reporting test results for task ${_task.key}...`);
     
-    // Placeholder: Log that reporting would happen here
-    log.info(`Would report results for task ${_task.key} to Jira and SCM`);
+    // Post to Jira
+    await this.testReporter.reportToJira(_task.key, _testResults);
+    
+    // Update issue state
+    await this.testReporter.updateTaskStatus(_task.key, _testResults);
+
+    // Commit to SCM if commit config is provided and there are test files
+    if (this.config.commit && _generatedTests.testFiles.length > 0) {
+      await this.testReporter.commitToScm(
+        _repository, 
+        _generatedTests.testFiles, 
+        _testResults, 
+        this.config.commit as CommitConfig, 
+        _task.key
+      );
+    }
   }
 
   /**

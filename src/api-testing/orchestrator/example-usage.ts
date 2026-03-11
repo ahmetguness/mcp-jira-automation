@@ -23,6 +23,7 @@ async function processSingleTask() {
       defaultBranch: 'main',
       scmAuthToken: process.env.GITHUB_TOKEN,
     },
+    appConfig: {} as any,
   });
 
   // Process a specific task
@@ -55,6 +56,7 @@ async function startContinuousPolling() {
       scmAuthToken: process.env.GITHUB_TOKEN,
     },
     enablePolling: true, // Enable continuous polling
+    appConfig: {} as any,
   });
 
   // Start the orchestrator
@@ -102,6 +104,7 @@ async function processWithCustomConfig() {
       branchPrefix: 'api-test',
     },
     requireApproval: false, // Auto-execute tests without approval
+    appConfig: {} as any,
   });
 
   const result = await orchestrator.processTaskByKey('PROJ-456');

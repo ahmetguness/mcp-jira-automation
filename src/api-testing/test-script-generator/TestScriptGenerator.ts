@@ -16,6 +16,7 @@ import type {
   FileContent,
 } from '../models/types.js';
 import { TestFramework, Environment, AuthType } from '../models/types.js';
+import type { TestPlan } from '../strategy/TestStrategyManager.js';
 import { createLogger } from '../../logger.js';
 import { CredentialManager } from '../credential-manager/index.js';
 import {
@@ -107,14 +108,14 @@ export class TestScriptGenerator {
    */
   async generateTests(
     context: TestContext,
-    endpoints: EndpointSpec[],
+    testPlan: TestPlan,
     framework: TestFramework,
     labels?: string[]
   ): Promise<GeneratedTests> {
-    logger.info(`Generating tests for ${endpoints.length} endpoints using ${framework}`);
+    logger.info(`Generating tests for ${testPlan.targetEndpoints.length} endpoints using ${framework}`);
 
     // Build structured prompt for AI
-    const prompt = this.buildPrompt(context, endpoints, framework, labels);
+    const prompt = this.buildPrompt(context, testPlan, framework, labels);
 
     // Call AI provider with the prompt
     const aiResponse = await this.callAiProvider(prompt, labels);
@@ -145,7 +146,7 @@ export class TestScriptGenerator {
    */
   buildPrompt(
     context: TestContext,
-    endpoints: EndpointSpec[],
+    testPlan: TestPlan,
     framework: TestFramework,
     labels?: string[]
   ): StructuredPrompt {
@@ -168,7 +169,7 @@ export class TestScriptGenerator {
     }
 
     // Add custom scenarios to endpoints that don't already have them
-    const enrichedEndpoints = endpoints.map((endpoint) => {
+    const enrichedEndpoints = testPlan.targetEndpoints.map((endpoint) => {
       if (customScenarios.length > 0 && endpoint.testScenarios.length === 0) {
         return {
           ...endpoint,
@@ -193,12 +194,13 @@ export class TestScriptGenerator {
         allowedTestPaths: ['tests/api/', '__tests__/api/', 'test/api/'],
         forbiddenOperations: this.getForbiddenOperations(envStr),
         requiredValidations: ['status_code', 'response_schema'],
+        globalCoverageRequirements: testPlan.globalCoverageRequirements,
       },
       testRules: {
-        includeSuccessCases: true,
-        includeErrorCases: true,
-        includeAuthTests: true,
-        includeValidationTests: true,
+        includeSuccessCases: testPlan.strategyConstraints.requireNegativeTests ? true : true, // Usually always true
+        includeErrorCases: testPlan.strategyConstraints.requireNegativeTests,
+        includeAuthTests: testPlan.strategyConstraints.requireAuthTests,
+        includeValidationTests: testPlan.strategyConstraints.requireContractValidation,
       },
     };
 
@@ -561,7 +563,15 @@ export class TestScriptGenerator {
     text += `## Constraints:\n\n`;
     text += `- Allowed test paths: ${prompt.constraints.allowedTestPaths.join(', ')}\n`;
     text += `- Forbidden operations: ${prompt.constraints.forbiddenOperations.join(', ')}\n`;
-    text += `- Required validations: ${prompt.constraints.requiredValidations.join(', ')}\n\n`;
+    text += `- Required validations: ${prompt.constraints.requiredValidations.join(', ')}\n`;
+    
+    if (prompt.constraints.globalCoverageRequirements && prompt.constraints.globalCoverageRequirements.length > 0) {
+      text += `\n### Global Coverage Requirements:\n`;
+      for (const req of prompt.constraints.globalCoverageRequirements) {
+        text += `- ${req}\n`;
+      }
+    }
+    text += `\n`;
 
     text += `## Instructions:\n\n`;
     text += `Generate comprehensive test scripts for the above endpoints using the ${prompt.framework} framework.\n`;

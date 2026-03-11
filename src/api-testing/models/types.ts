@@ -227,6 +227,7 @@ export interface StructuredPrompt {
     allowedTestPaths: string[];
     forbiddenOperations: string[];
     requiredValidations: string[];
+    globalCoverageRequirements?: string[];
   };
   testRules: {
     includeSuccessCases: boolean;
