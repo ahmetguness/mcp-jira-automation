@@ -5,7 +5,6 @@
 import type { TaskContext, AiAnalysis } from "../types.js";
 import { getBasePrompt } from "./prompts/basePrompt.js";
 import { getOverlayPrompt } from "./prompts/overlays.js";
-import { getMultiLangRules } from "./prompts/multiLangRules.js";
 
 export interface AiProvider {
   /** Analyze a task and generate patches + commands */
@@ -76,18 +75,13 @@ export interface AiProvider {
 // }
 
 export function buildSystemPrompt(options: { primaryLanguage?: string; isMulti?: boolean } = {}): string {
-  const { primaryLanguage, isMulti } = options;
+  const { primaryLanguage } = options;
   let prompt = getBasePrompt();
 
-  if (isMulti) {
-    prompt += "\n\n" + getMultiLangRules();
-  }
-
-  if (primaryLanguage && primaryLanguage !== "unknown") {
-    prompt += "\n\n" + getOverlayPrompt(primaryLanguage);
-  } else {
-    prompt += "\n\n" + getOverlayPrompt("unknown");
-  }
+  // Add source-code context overlay (helps AI understand the repo's language)
+  // Tests are always Node.js regardless (see basePrompt)
+  const lang = primaryLanguage && primaryLanguage !== "unknown" ? primaryLanguage : "unknown";
+  prompt += "\n\n" + getOverlayPrompt(lang);
 
   return prompt;
 }

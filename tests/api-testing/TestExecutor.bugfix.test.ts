@@ -16,6 +16,11 @@ import { TestExecutor } from '../../src/api-testing/test-executor/TestExecutor.j
 import type { ExecutionConfig } from '../../src/api-testing/models/types.js';
 import { Environment } from '../../src/api-testing/models/enums.js';
 
+// Type for accessing private methods in tests
+interface TestExecutorWithPrivate {
+  buildEnvironmentVariables: (config: ExecutionConfig) => string[];
+}
+
 describe('Bug Condition Exploration: NODE_ENV Missing in Docker Test Execution', () => {
   /**
    * Property 1: Bug Condition - NODE_ENV Missing in Docker Test Execution
@@ -43,7 +48,7 @@ describe('Bug Condition Exploration: NODE_ENV Missing in Docker Test Execution',
 
       // Access the private buildEnvironmentVariables method via reflection
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       // CRITICAL ASSERTION: This will FAIL on unfixed code
@@ -70,7 +75,7 @@ describe('Bug Condition Exploration: NODE_ENV Missing in Docker Test Execution',
       };
 
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       // Confirm fixed behavior: NODE_ENV is present
@@ -107,7 +112,7 @@ describe('Bug Condition Exploration: NODE_ENV Missing in Docker Test Execution',
             };
 
             const executor = new TestExecutor();
-            const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+            const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
             const envVars: string[] = buildEnvVars(config);
 
             // CRITICAL: This will fail on unfixed code for all generated inputs
@@ -138,7 +143,7 @@ describe('Bug Condition Exploration: NODE_ENV Missing in Docker Test Execution',
       };
 
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       // Verify base environment variables are present
@@ -162,7 +167,7 @@ describe('Bug Condition Exploration: NODE_ENV Missing in Docker Test Execution',
       };
 
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       // Verify credentials are appended
@@ -215,7 +220,7 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
             };
 
             const executor = new TestExecutor();
-            const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+            const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
             const envVars: string[] = buildEnvVars(config);
 
             // Verify all credentials are included in the environment variables
@@ -247,7 +252,7 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
       };
 
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       // Verify credentials with special characters are preserved exactly
@@ -285,7 +290,7 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
             };
 
             const executor = new TestExecutor();
-            const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+            const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
             const envVars: string[] = buildEnvVars(config);
 
             // Verify all base environment variables are present
@@ -312,7 +317,7 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
       };
 
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       // Verify base environment variables are present
@@ -351,7 +356,7 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
             };
 
             const executor = new TestExecutor();
-            const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+            const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
             const envVars: string[] = buildEnvVars(config);
 
             // Find indices of base variables
@@ -397,7 +402,7 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
       };
 
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       // Verify the specific order of base variables
@@ -431,7 +436,7 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
       };
 
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       expect(envVars).toContain('API_KEY=single-key');
@@ -456,7 +461,7 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
       };
 
       const executor = new TestExecutor();
-      const buildEnvVars = (executor as any).buildEnvironmentVariables.bind(executor);
+      const buildEnvVars = (executor as unknown as TestExecutorWithPrivate).buildEnvironmentVariables.bind(executor);
       const envVars: string[] = buildEnvVars(config);
 
       // Verify all credentials are included
@@ -471,3 +476,5 @@ describe('Preservation Property Tests: Existing Behavior Must Be Preserved', () 
     });
   });
 });
+
+

@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { JiraListener, type JiraListenerConfig } from '../../src/api-testing/jira-listener/index.js';
+import { createHmac } from 'crypto';
 
 describe('JiraListener', () => {
   let config: JiraListenerConfig;
@@ -66,19 +67,20 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse,
+        json: () => Promise.resolve(mockResponse),
       } as Response);
 
       const tasks = await listener.pollTasks();
 
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].key).toBe('TEST-123');
-      expect(tasks[0].summary).toBe('Test API endpoint');
-      expect(tasks[0].description).toBe('Test description');
-      expect(tasks[0].status).toBe('To Do');
-      expect(tasks[0].assignee).toBe('AI Cyber Bot');
-      expect(tasks[0].projectKey).toBe('TEST');
-      expect(tasks[0].labels).toEqual(['api-test']);
+      expect(tasks[0]).toBeDefined();
+      expect(tasks[0]?.key).toBe('TEST-123');
+      expect(tasks[0]?.summary).toBe('Test API endpoint');
+      expect(tasks[0]?.description).toBe('Test description');
+      expect(tasks[0]?.status).toBe('To Do');
+      expect(tasks[0]?.assignee).toBe('AI Cyber Bot');
+      expect(tasks[0]?.projectKey).toBe('TEST');
+      expect(tasks[0]?.labels).toEqual(['api-test']);
     });
 
     it('should return empty array when no tasks found', async () => {
@@ -88,7 +90,7 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse,
+        json: () => Promise.resolve(mockResponse),
       } as Response);
 
       const tasks = await listener.pollTasks();
@@ -114,15 +116,16 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse,
+        json: () => Promise.resolve(mockResponse),
       } as Response);
 
       const tasks = await listener.pollTasks();
 
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].description).toBe('');
-      expect(tasks[0].assignee).toBe('Unassigned');
-      expect(tasks[0].labels).toEqual([]);
+      expect(tasks[0]).toBeDefined();
+      expect(tasks[0]?.description).toBe('');
+      expect(tasks[0]?.assignee).toBe('Unassigned');
+      expect(tasks[0]?.labels).toEqual([]);
     });
 
     it('should throw error on API failure', async () => {
@@ -130,7 +133,7 @@ describe('JiraListener', () => {
         ok: false,
         status: 401,
         statusText: 'Unauthorized',
-        text: async () => 'Invalid credentials',
+        text: () => Promise.resolve('Invalid credentials'),
       } as Response);
 
       await expect(listener.pollTasks()).rejects.toThrow('Jira API error: 401 Unauthorized');
@@ -156,12 +159,13 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse,
+        json: () => Promise.resolve(mockResponse),
       } as Response);
 
       const tasks = await listener.pollTasks();
 
-      expect(tasks[0].customFields).toEqual({
+      expect(tasks[0]).toBeDefined();
+      expect(tasks[0]?.customFields).toEqual({
         customfield_10001: 'https://github.com/org/repo',
         customfield_10002: 'staging',
       });
@@ -186,11 +190,12 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockIssue,
+        json: () => Promise.resolve(mockIssue),
       } as Response);
 
       const task = await listener.getTaskDetails('TEST-123');
 
+      expect(task).toBeDefined();
       expect(task.key).toBe('TEST-123');
       expect(task.summary).toBe('Test API endpoint');
       expect(task.description).toBe('Detailed description');
@@ -202,7 +207,7 @@ describe('JiraListener', () => {
         ok: false,
         status: 404,
         statusText: 'Not Found',
-        text: async () => 'Issue does not exist',
+        text: () => Promise.resolve('Issue does not exist'),
       } as Response);
 
       await expect(listener.getTaskDetails('INVALID-999')).rejects.toThrow('Jira API error: 404 Not Found');
@@ -229,7 +234,7 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse,
+        json: () => Promise.resolve(mockResponse),
       } as Response);
 
       listener.startPolling(handler);
@@ -261,7 +266,7 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse,
+        json: () => Promise.resolve(mockResponse),
       } as Response);
 
       listener.startPolling(handler);
@@ -298,7 +303,7 @@ describe('JiraListener', () => {
 
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ issues: [] }),
+        json: () => Promise.resolve({ issues: [] }),
       } as Response);
       global.fetch = mockFetch;
 
@@ -306,14 +311,15 @@ describe('JiraListener', () => {
 
       expect(mockFetch).toHaveBeenCalled();
       const callArgs = mockFetch.mock.calls[0];
-      const requestBody = JSON.parse(callArgs[1].body as string);
+      expect(callArgs).toBeDefined();
+      const requestBody = JSON.parse(callArgs?.[1].body as string);
       expect(requestBody.jql).toBe('project = TEST AND status = "To Do"');
     });
 
     it('should use default JQL when no override provided', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ issues: [] }),
+        json: () => Promise.resolve({ issues: [] }),
       } as Response);
       global.fetch = mockFetch;
 
@@ -321,7 +327,8 @@ describe('JiraListener', () => {
 
       expect(mockFetch).toHaveBeenCalled();
       const callArgs = mockFetch.mock.calls[0];
-      const requestBody = JSON.parse(callArgs[1].body as string);
+      expect(callArgs).toBeDefined();
+      const requestBody = JSON.parse(callArgs?.[1].body as string);
       expect(requestBody.jql).toContain('assignee = "AI Cyber Bot"');
       expect(requestBody.jql).toContain('statusCategory != Done');
     });
@@ -335,7 +342,7 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockWebhookResponse,
+        json: () => Promise.resolve(mockWebhookResponse),
       } as Response);
 
       const callbackUrl = 'https://example.com/webhook';
@@ -354,7 +361,7 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockWebhookResponse,
+        json: () => Promise.resolve(mockWebhookResponse),
       } as Response);
 
       const callbackUrl = 'https://example.com/webhook';
@@ -377,7 +384,7 @@ describe('JiraListener', () => {
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockWebhookResponse,
+        json: () => Promise.resolve(mockWebhookResponse),
       } as Response);
 
       const callbackUrl = 'https://example.com/webhook';
@@ -391,7 +398,7 @@ describe('JiraListener', () => {
         ok: false,
         status: 403,
         statusText: 'Forbidden',
-        text: async () => 'Insufficient permissions',
+        text: () => Promise.resolve('Insufficient permissions'),
       } as Response);
 
       const callbackUrl = 'https://example.com/webhook';
@@ -405,8 +412,7 @@ describe('JiraListener', () => {
       const payload = '{"webhookEvent":"jira:issue_updated"}';
       
       // Generate valid signature
-      const crypto = require('crypto');
-      const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+      const signature = createHmac('sha256', secret).update(payload).digest('hex');
 
       const isValid = listener.verifyWebhookSignature(payload, signature, secret);
       expect(isValid).toBe(true);
@@ -426,8 +432,7 @@ describe('JiraListener', () => {
       const wrongSecret = 'wrong-secret';
       const payload = '{"webhookEvent":"jira:issue_updated"}';
       
-      const crypto = require('crypto');
-      const signature = crypto.createHmac('sha256', wrongSecret).update(payload).digest('hex');
+      const signature = createHmac('sha256', wrongSecret).update(payload).digest('hex');
 
       const isValid = listener.verifyWebhookSignature(payload, signature, secret);
       expect(isValid).toBe(false);
@@ -489,8 +494,7 @@ describe('JiraListener', () => {
       };
 
       const payload = JSON.stringify(webhookPayload);
-      const crypto = require('crypto');
-      const signature = crypto.createHmac('sha256', 'test-secret').update(payload).digest('hex');
+      const signature = createHmac('sha256', 'test-secret').update(payload).digest('hex');
 
       const task = await listenerWithSecret.handleWebhookCallback(payload, signature);
 

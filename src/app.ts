@@ -10,6 +10,7 @@ import { createAiProvider, type AiProvider } from "./ai/index.js";
 import { PipelineHandler } from "./pipeline/handler.js";
 import { StateStore } from "./state/store.js";
 import { createLogger } from "./logger.js";
+import { Executor } from "./executor/index.js";
 
 const log = createLogger("app");
 
@@ -19,6 +20,7 @@ export class App {
     private scm!: ScmProvider;
     private ai!: AiProvider;
     private pipeline!: PipelineHandler;
+    private executor!: Executor;
     private state: StateStore;
     private poller: JiraPoller | null = null;
     private webhook: JiraWebhook | null = null;
@@ -39,10 +41,11 @@ export class App {
         this.jira = new JiraClient(this.mcp, this.config);
         this.scm = createScmProvider(this.config, this.mcp);
         this.ai = createAiProvider(this.config);
+        this.executor = new Executor(this.config);
         this.pipeline = new PipelineHandler(this.config, this.jira, this.scm, this.ai, this.state);
 
         // 3. Check Docker
-        const dockerReady = await this.pipeline.isReady();
+        const dockerReady = await this.executor.isReady();
         if (!dockerReady) {
             log.warn("⚠️ Docker is not available. Execution will fail. Please start Docker.");
         }
@@ -50,10 +53,14 @@ export class App {
         // 4. Start listener
         if (this.config.mode === "webhook") {
             this.webhook = new JiraWebhook(this.jira, this.config);
-            this.webhook.start(async (issue) => { await this.pipeline.handle(issue); });
+            this.webhook.start(async (issue) => {
+                await this.pipeline.handle(issue);
+            });
         } else {
             this.poller = new JiraPoller(this.jira, this.config);
-            this.poller.start(async (issue) => { await this.pipeline.handle(issue); });
+            this.poller.start(async (issue) => {
+                await this.pipeline.handle(issue);
+            });
         }
 
         log.info("🚀 AI Cyber Bot is running!");
@@ -73,6 +80,7 @@ export class App {
 
         log.info("Goodbye! 👋");
     }
+
 
     private setupShutdownHandlers(): void {
         const shutdown = async () => {

@@ -1,8 +1,8 @@
-# AI Cyber Bot — MCP Jira Automation
+# AI Cyber Bot — API Testing Automation
 
-**AI Cyber Bot** is an **autonomous software development assistant (AI Agent)** that automatically retrieves tasks from Jira, fetches relevant files from code repositories (GitHub/GitLab/Bitbucket), analyzes them with open-source and popular AI models (OpenAI/Anthropic/Gemini/vLLM), tests generated changes in an isolated Docker environment, and if successful, opens a Pull Request (PR) and reports the result back to Jira.
+**AI Cyber Bot** is an **autonomous API testing system** that automatically retrieves API endpoint specifications from Jira tasks, generates comprehensive test scripts using AI models (OpenAI/Anthropic/Gemini/vLLM), executes tests in isolated Docker environments, and reports results back to Jira with pull requests containing the generated tests.
 
-This system is designed not as a standard CI/CD tool, but as a **dynamic software engineering automation infrastructure** where decisions are made by AI.
+This system transforms API endpoint specifications into production-ready test suites, supporting multiple test frameworks (pytest, Jest, Postman) and endpoint specification formats (JSON, YAML, Markdown tables).
 
 ---
 
@@ -10,26 +10,33 @@ This system is designed not as a standard CI/CD tool, but as a **dynamic softwar
 
 ```mermaid
 graph TD
-    A[Jira Listener<br/>Polling/Webhook] -->|1. Fetch Issue| B(Task Context Builder)
-    B -->|2. Find Repo/Branch| C((SCM Provider<br/>GitHub/GitLab/Bitbucket))
-    C -->|3. Fetch Files| B
-    B -->|4. Create Prompt| D{AI Provider<br/>OpenAI/Anthropic/Gemini/vLLM}
-    D -->|5. Json: Patch + Commands| E[Executor<br/>Security Policy]
-    E -->|6. Safe Commands| F[(Docker Two-Container Architecture<br/>Scout & Runner)]
-    F -->|7. Stdout / Stderr| G[Reporter & Git Ops]
-    G -->|8. Open Branch & PR| C
-    G -->|9. Write Result Comment| H[Jira API<br/>via mcp-atlassian]
+    A[Jira Task<br/>with Endpoint Specs] -->|1. Parse Endpoints| B(EndpointParser)
+    B -->|2. Validate Specs| C{Valid?}
+    C -->|No| D[Report Errors to Jira]
+    C -->|Yes| E[RepositoryResolver]
+    E -->|3. Resolve Repo| F((SCM Provider<br/>GitHub/GitLab/Bitbucket))
+    F -->|4. Fetch Context| G[TestScriptGenerator]
+    G -->|5. Generate Tests| H{AI Provider<br/>OpenAI/Anthropic/Gemini/vLLM}
+    H -->|6. Test Scripts| I{Approval Required?}
+    I -->|Yes| J[Post to Jira & Wait]
+    I -->|No| K[TestExecutor]
+    J -->|Approved| K
+    K -->|7. Execute in Docker| L[(Docker Container<br/>Isolated Environment)]
+    L -->|8. Test Results| M[TestReporter]
+    M -->|9. Create PR| F
+    M -->|10. Report Results| N[Jira API<br/>via mcp-atlassian]
 ```
 
 ### Key Features
-- **Idempotency & Retry**: In case of system crash, the same task is not processed repeatedly (Retry/Backoff mechanisms with JSON-based lock and state management).
-- **Two-Container Isolated Test Environment**: 
-  - **Scout Container (alpine/git):** Safely clones code and automatically detects the project's language/type (Node.js, Python, etc.).
-  - **Runner Container:** A custom image (e.g., `node:20-bookworm`) is launched based on the decision, and AI-generated commands and tests are executed in a way that cannot harm the outside world or the host machine (including Read-only RootFS support).
-- **Security Policy & Secret Audit**: Harmful commands like `sudo`, `rm -rf /` are blocked. In strict mode, only commands like `npm test`, `pytest`, `go test` are allowed. Additionally, secret keys in `.env` file are not logged, only their existence (auditSecrets) is checked.
-- **Approval Mode (`REQUIRE_APPROVAL=true`)**: Instead of AI directly changing code, it first writes its plan to Jira and waits for your approval (status change).
-- **Provider Independent**: You can switch from GitHub to GitLab or from OpenAI to Anthropic with a single `.env` setting.
-- **Fully Local Mode (vLLM)**: If code security is critical, you can work with open-source models (vLLM) on your company's internal servers without exposing code externally.
+- **Endpoint Specification Parsing**: Supports JSON, YAML, and Markdown table formats for defining API endpoints in Jira tasks.
+- **AI-Powered Test Generation**: Automatically generates comprehensive test suites including functional tests, status code validation, schema validation, authentication tests, and edge cases.
+- **Framework Detection**: Automatically detects and uses the appropriate test framework (pytest with requests, Jest with axios, or Postman collections).
+- **Isolated Test Execution**: Tests run in ephemeral Docker containers with timeout protection and resource limits.
+- **Approval Workflow**: Optional review gate where generated tests can be reviewed before execution (`REQUIRE_APPROVAL=true`).
+- **Comprehensive Test Types**: Generates functional tests, status code tests, response body validation, schema validation, input validation, authentication tests, CRUD workflows, edge cases, and regression tests.
+- **Automatic PR Creation**: Generated test scripts are committed to a branch and opened as a pull request with detailed test results.
+- **Provider Independent**: Switch between GitHub/GitLab/Bitbucket and OpenAI/Anthropic/Gemini/vLLM with simple configuration.
+- **Idempotency & Retry**: Exponential backoff and state management prevent duplicate processing and handle transient failures.
 
 ---
 
@@ -147,19 +154,95 @@ docker-compose up -d
 ## 🧪 Quick Test
 
 ### Step 1: Prepare Repository
-Use your own repository or fork a test repository.
+Use your own repository or fork a test repository that contains an API you want to test.
 
-### Step 2: Create Jira Task
+### Step 2: Create Jira Task with Endpoint Specifications
+
+You can specify API endpoints in three formats:
+
+#### Format 1: JSON
 ```
-Summary: Add email validation to Member model
+Summary: Test User API Endpoints
 
 Description:
-The Member model should validate firstName field.
+Test the user management API endpoints.
 
-Requirements:
-- firstName is required
-- firstName must be at least 2 characters
-- Return 400 Bad Request with error message
+Endpoints:
+```json
+[
+  {
+    "url": "https://api.example.com/users",
+    "method": "GET",
+    "expectedStatus": 200,
+    "authType": "Bearer",
+    "testScenarios": ["success", "unauthorized"]
+  },
+  {
+    "url": "https://api.example.com/users",
+    "method": "POST",
+    "expectedStatus": 201,
+    "authType": "Bearer",
+    "requestBody": {
+      "firstName": "John",
+      "lastName": "Doe",
+      "email": "john@example.com"
+    },
+    "testScenarios": ["success", "validation_error", "unauthorized"]
+  }
+]
+```
+
+Repository: YOUR_USERNAME/YOUR_REPO
+```
+
+#### Format 2: YAML
+```
+Summary: Test User API Endpoints
+
+Description:
+Test the user management API endpoints.
+
+Endpoints:
+```yaml
+- url: https://api.example.com/users
+  method: GET
+  expectedStatus: 200
+  authType: Bearer
+  testScenarios:
+    - success
+    - unauthorized
+
+- url: https://api.example.com/users
+  method: POST
+  expectedStatus: 201
+  authType: Bearer
+  requestBody:
+    firstName: John
+    lastName: Doe
+    email: john@example.com
+  testScenarios:
+    - success
+    - validation_error
+    - unauthorized
+```
+
+Repository: YOUR_USERNAME/YOUR_REPO
+```
+
+#### Format 3: Markdown Table
+```
+Summary: Test User API Endpoints
+
+Description:
+Test the user management API endpoints.
+
+| Method | URL | Expected Status | Auth Type | Test Scenarios |
+|--------|-----|-----------------|-----------|----------------|
+| GET | https://api.example.com/users | 200 | Bearer | success, unauthorized |
+| POST | https://api.example.com/users | 201 | Bearer | success, validation_error, unauthorized |
+| GET | https://api.example.com/users/{id} | 200 | Bearer | success, not_found, unauthorized |
+| PUT | https://api.example.com/users/{id} | 200 | Bearer | success, validation_error, not_found |
+| DELETE | https://api.example.com/users/{id} | 204 | Bearer | success, not_found, unauthorized |
 
 Repository: YOUR_USERNAME/YOUR_REPO
 ```
@@ -176,14 +259,30 @@ The bot will detect the task within 15-30 seconds and start processing. Monitor 
 ```
 INFO - Found 1 issue: KAN-XXX
 INFO - Processing issue KAN-XXX
+INFO - Parsing endpoint specifications...
+INFO - Found 5 endpoints to test
 INFO - Repository: YOUR_USERNAME/YOUR_REPO
-INFO - Fetching files from repository...
-INFO - Sending to AI for analysis...
+INFO - Fetching repository context...
+INFO - Detected test framework: pytest
+INFO - Generating comprehensive test suite...
 INFO - Starting Docker executor...
-INFO - Tests passed!
+INFO - Tests passed! (15/15 tests)
 INFO - Creating Pull Request...
 ✅ Issue KAN-XXX completed successfully
 ```
+
+### What Gets Generated
+
+The system generates comprehensive test suites including:
+- **Functional Tests**: Verify endpoint behavior (GET /users, POST /login, etc.)
+- **Status Code Tests**: Validate correct HTTP status codes (200, 201, 400, 401, 404, etc.)
+- **Response Body Tests**: Verify JSON content structure and field values
+- **Schema Validation Tests**: Ensure response JSON conforms to defined schemas
+- **Input Validation Tests**: Verify error handling for missing fields, wrong types, empty data
+- **Authentication Tests**: Token-based access, no-token scenarios, invalid token handling
+- **CRUD Tests**: Verify Create → Read → Update → Delete workflows
+- **Edge Case Tests**: Invalid IDs, excessively long strings, null values
+- **Regression Tests**: Verify existing endpoints remain functional
 
 For detailed test guide: [QUICK-START.md](QUICK-START.md)
 
@@ -202,35 +301,134 @@ For detailed test guide: [QUICK-START.md](QUICK-START.md)
 | **AI Selection** | |
 | `AI_PROVIDER` | `openai`, `anthropic`, `gemini`, or `vllm`. |
 | **IMPORTANT (vLLM)** | If using `vLLM`, the model you choose **Must support "Tool/Function Calling"**. Recommended: `Qwen2.5-72B-Instruct`, `Llama-3.1-70B-Instruct`. |
-| **Security & Executor** | |
-| `EXEC_POLICY` | `strict` (Whitelist only) or `permissive` (All allowed, only blacklist blocked). |
-| `REQUIRE_APPROVAL` | If set to `true`, report is written to Jira and human approval is awaited before code is pushed and tested. |
-| `ALLOW_INSTALL_SCRIPTS` | Determines whether AI can use commands like npm install/pip install before test commands to be executed in Docker. |
+| **API Testing Configuration** | |
+| `REQUIRE_APPROVAL` | If set to `true`, generated tests are posted to Jira for review before execution. |
+| `TEST_TIMEOUT_SECONDS` | Maximum time allowed for test execution (default: 300 seconds). |
+| `TEST_RETRY_COUNT` | Number of retry attempts for transient failures (default: 3). |
+| `DEFAULT_TEST_FRAMEWORK` | Default test framework when auto-detection fails (`pytest`, `jest`, or `postman`). |
+
+---
+
+## 📝 Endpoint Specification Format
+
+### Supported Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `url` | string | Yes | Full URL or path of the endpoint |
+| `method` | string | Yes | HTTP method: GET, POST, PUT, DELETE, PATCH |
+| `expectedStatus` | number | Yes | Expected HTTP status code (200, 201, 400, etc.) |
+| `authType` | string | No | Authentication type: Bearer, Basic, ApiKey, OAuth2 |
+| `headers` | object | No | Custom request headers |
+| `requestBody` | object | No | Request payload for POST/PUT/PATCH |
+| `expectedResponseSchema` | object | No | JSON schema for response validation |
+| `testScenarios` | array | No | Scenarios to test: success, unauthorized, not_found, validation_error, etc. |
+| `performanceThresholdMs` | number | No | Maximum acceptable response time in milliseconds |
+
+### Example: Complete Endpoint Specification
+
+```json
+{
+  "url": "https://api.example.com/users",
+  "method": "POST",
+  "expectedStatus": 201,
+  "authType": "Bearer",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "requestBody": {
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john@example.com"
+  },
+  "expectedResponseSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string" },
+      "firstName": { "type": "string" },
+      "lastName": { "type": "string" },
+      "email": { "type": "string", "format": "email" }
+    },
+    "required": ["id", "firstName", "lastName", "email"]
+  },
+  "testScenarios": [
+    "success",
+    "validation_error",
+    "unauthorized",
+    "duplicate_email"
+  ],
+  "performanceThresholdMs": 500
+}
+```
+
+### Available Test Scenarios
+
+When specifying `testScenarios` in your endpoint specifications, you can use:
+
+- **success**: Happy path with valid data and authentication
+- **unauthorized**: Request without authentication token
+- **forbidden**: Request with valid token but insufficient permissions
+- **not_found**: Request for non-existent resource (404)
+- **validation_error**: Request with invalid or missing required fields (400)
+- **duplicate**: Attempt to create duplicate resource (409)
+- **rate_limit**: Test rate limiting behavior (429)
+- **server_error**: Simulate server error scenarios (500)
+- **timeout**: Test timeout handling
+- **invalid_token**: Request with malformed or expired token
+- **missing_fields**: Request with missing required fields
+- **wrong_types**: Request with incorrect data types
+- **empty_data**: Request with empty strings or null values
+- **boundary_values**: Test with minimum/maximum allowed values
+- **special_characters**: Test with special characters in input
 
 ---
 
 ## 🛠️ How Does It Work? (A Task's Journey)
 
-1. Developer creates a new task in Jira. Writes `company/backend-api` in the "Repository" custom field (or in description).
-2. Developer selects **"AI Cyber Bot"** as the assignee.
-3. In the background, the poller catches this change.
-4. Bot goes to the specified SCM (Github/Gitlab) and prepares by fetching source and test files of that repo with an intelligent filter (Context Builder).
-5. Request is sent to AI. AI is asked to create a **patch (code change) list and test command scenario**.
-6. Code changes generated by AI are saved.
-7. **Docker Executor** comes into play:
-   - **Scout phase:** Project is cloned and project type (Node, Python, etc.) is discovered by looking at files like `package.json`, `requirements.txt` (Project Detection System).
-   - **Main/Runner phase:** A Docker Container appropriate for the determined type (e.g., `node:20-bookworm`) is launched. AI-generated code (patch) is applied and after dependencies are installed, given test commands are executed in complete isolation.
-8. If the test in the container finishes **successfully (Exit Code 0)**, an automatic branch is opened from the project in SCM, changes are committed, and a Pull Request is created.
-9. Temporary Docker limits, stderr/stdout logs, and opened PR link are written as a comment to that task in Jira, and the ticket can be moved to Done. If the process fails, the Jira task is updated with error analysis and logs.
+1. Developer creates a new task in Jira with API endpoint specifications in JSON, YAML, or Markdown table format.
+2. Developer writes `company/backend-api` in the "Repository" custom field (or in description).
+3. Developer selects **"AI Cyber Bot"** as the assignee.
+4. In the background, the poller catches this change.
+5. **EndpointParser** parses and validates the endpoint specifications from the task description.
+   - If validation fails, errors are posted to Jira with specific details about what's wrong.
+6. **RepositoryResolver** extracts repository information and resolves the SCM provider (GitHub/GitLab/Bitbucket).
+7. **TestScriptGenerator** fetches repository context:
+   - Existing test files for reference
+   - API specifications (OpenAPI/Swagger if available)
+   - Configuration files (package.json, requirements.txt, etc.)
+   - Detects the appropriate test framework (pytest, Jest, Postman)
+8. AI generates comprehensive test scripts including:
+   - Functional tests for each endpoint
+   - Status code validation
+   - Response schema validation
+   - Authentication tests
+   - Input validation tests
+   - Edge case tests
+   - CRUD workflow tests
+9. If `REQUIRE_APPROVAL=true`, generated tests are posted to Jira for review. Otherwise, proceed to execution.
+10. **TestExecutor** creates an ephemeral Docker container:
+    - Clones the repository
+    - Injects generated test scripts
+    - Installs dependencies
+    - Executes tests with timeout protection
+    - Captures test results and output
+11. **TestReporter** processes results:
+    - Creates a new branch: `api-tests/{jira-key}`
+    - Commits generated test scripts
+    - Opens a Pull Request with test results
+    - Posts formatted test results to Jira as a comment
+    - Adds appropriate labels: `tests-passed`, `test-failed`, or `permanently-failed`
+12. Developer reviews the PR, merges the tests, and closes the Jira task.
 
 ---
 
 ## 📚 Documentation
 
-- **[QUICK-START.md](QUICK-START.md)** - Quick start guide
+- **[QUICK-START.md](QUICK-START.md)** - Quick start guide for API testing
 - **[MCP-ATLASSIAN-SETUP.md](MCP-ATLASSIAN-SETUP.md)** - MCP Atlassian setup guide
 - **[JIRA-REPOSITORY-GUIDE.md](JIRA-REPOSITORY-GUIDE.md)** - Jira repository configuration guide
 - **[scripts/README.md](scripts/README.md)** - Startup scripts documentation
+- **[API-TESTING-GUIDE.md](API-TESTING-GUIDE.md)** - Comprehensive API testing workflow guide
 
 ---
 
@@ -238,6 +436,57 @@ For detailed test guide: [QUICK-START.md](QUICK-START.md)
 
 - **Adding New AI:** Just add `xyz.ts` under `src/ai/` and register it in the `index.ts` array using the `AiProvider` interface.
 - **Adding New SCM:** Just write the MCP adapter for your new platform under `src/scm/`.
+- **Adding New Test Framework:** Extend `TestScriptGenerator` to support additional frameworks beyond pytest, Jest, and Postman.
+- **Custom Endpoint Parsers:** Add support for additional specification formats (e.g., OpenAPI, Swagger) in `EndpointParser`.
+
+---
+
+## 🎯 Use Cases
+
+### API Development Teams
+- Automatically generate test suites for new API endpoints
+- Ensure consistent test coverage across all endpoints
+- Validate API contracts and response schemas
+- Catch breaking changes early with regression tests
+
+### QA Engineers
+- Reduce manual test writing effort
+- Generate comprehensive test scenarios automatically
+- Test authentication and authorization flows
+- Validate error handling and edge cases
+
+### DevOps Teams
+- Integrate API testing into CI/CD pipelines
+- Monitor API health with automated test execution
+- Track test results and coverage in Jira
+- Maintain test scripts in version control via PRs
+
+---
+
+## 📊 Test Result Reporting
+
+Test results are posted to Jira with detailed information:
+
+```
+✅ API Tests Completed Successfully
+
+Test Summary:
+- Total Tests: 15
+- Passed: 15
+- Failed: 0
+- Duration: 12.3 seconds
+
+Test Details:
+✅ test_get_users_success (0.5s)
+✅ test_get_users_unauthorized (0.3s)
+✅ test_post_user_success (0.8s)
+✅ test_post_user_validation_error (0.4s)
+✅ test_post_user_duplicate_email (0.6s)
+...
+
+Pull Request: https://github.com/org/repo/pull/123
+Branch: api-tests/KAN-456
+```
 
 ---
 

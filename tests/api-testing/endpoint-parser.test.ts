@@ -31,10 +31,11 @@ Test this API endpoint:
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].url).toBe('/api/users');
-      expect(endpoints[0].method).toBe(HttpMethod.GET);
-      expect(endpoints[0].headers['Content-Type']).toBe('application/json');
-      expect(endpoints[0].expectedStatus).toBe(200);
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('/api/users');
+      expect(endpoints[0]?.method).toBe(HttpMethod.GET);
+      expect(endpoints[0]?.headers['Content-Type']).toBe('application/json');
+      expect(endpoints[0]?.expectedStatus).toBe(200);
     });
 
     it('should parse multiple endpoints from JSON array', () => {
@@ -61,9 +62,11 @@ Test this API endpoint:
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(2);
-      expect(endpoints[0].method).toBe(HttpMethod.GET);
-      expect(endpoints[1].method).toBe(HttpMethod.POST);
-      expect(endpoints[1].requestBody).toEqual({ name: 'John Doe' });
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[1]).toBeDefined();
+      expect(endpoints[0]?.method).toBe(HttpMethod.GET);
+      expect(endpoints[1]?.method).toBe(HttpMethod.POST);
+      expect(endpoints[1]?.requestBody).toEqual({ name: 'John Doe' });
     });
 
     it('should handle JSON with various field name variations', () => {
@@ -83,9 +86,10 @@ Test this API endpoint:
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].url).toBe('/api/products');
-      expect(endpoints[0].method).toBe(HttpMethod.POST);
-      expect(endpoints[0].authType).toBe(AuthType.BEARER);
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('/api/products');
+      expect(endpoints[0]?.method).toBe(HttpMethod.POST);
+      expect(endpoints[0]?.authType).toBe(AuthType.BEARER);
     });
   });
 
@@ -104,9 +108,10 @@ expectedStatus: 200
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].url).toBe('/api/users');
-      expect(endpoints[0].method).toBe(HttpMethod.GET);
-      expect(endpoints[0].expectedStatus).toBe(200);
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('/api/users');
+      expect(endpoints[0]?.method).toBe(HttpMethod.GET);
+      expect(endpoints[0]?.expectedStatus).toBe(200);
     });
 
     it('should parse multiple endpoints from YAML array', () => {
@@ -126,8 +131,10 @@ expectedStatus: 200
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(2);
-      expect(endpoints[0].method).toBe(HttpMethod.GET);
-      expect(endpoints[1].method).toBe(HttpMethod.POST);
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[1]).toBeDefined();
+      expect(endpoints[0]?.method).toBe(HttpMethod.GET);
+      expect(endpoints[1]?.method).toBe(HttpMethod.POST);
     });
 
     it('should handle YAML with authentication', () => {
@@ -145,9 +152,10 @@ testScenarios:
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].authType).toBe(AuthType.BEARER);
-      expect(endpoints[0].testScenarios).toContain('success');
-      expect(endpoints[0].testScenarios).toContain('unauthorized');
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[0]?.authType).toBe(AuthType.BEARER);
+      expect(endpoints[0]?.testScenarios).toContain('success');
+      expect(endpoints[0]?.testScenarios).toContain('unauthorized');
     });
   });
 
@@ -165,11 +173,13 @@ Test these endpoints:
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(2);
-      expect(endpoints[0].url).toBe('/api/users');
-      expect(endpoints[0].method).toBe(HttpMethod.GET);
-      expect(endpoints[0].expectedStatus).toBe(200);
-      expect(endpoints[1].method).toBe(HttpMethod.POST);
-      expect(endpoints[1].expectedStatus).toBe(201);
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[1]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('/api/users');
+      expect(endpoints[0]?.method).toBe(HttpMethod.GET);
+      expect(endpoints[0]?.expectedStatus).toBe(200);
+      expect(endpoints[1]?.method).toBe(HttpMethod.POST);
+      expect(endpoints[1]?.expectedStatus).toBe(201);
     });
 
     it('should handle table with various column names', () => {
@@ -183,10 +193,12 @@ Test these endpoints:
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(2);
-      expect(endpoints[0].url).toBe('/api/products');
-      expect(endpoints[0].authType).toBe(AuthType.BEARER);
-      expect(endpoints[1].method).toBe(HttpMethod.DELETE);
-      expect(endpoints[1].expectedStatus).toBe(204);
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[1]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('/api/products');
+      expect(endpoints[0]?.authType).toBe(AuthType.BEARER);
+      expect(endpoints[1]?.method).toBe(HttpMethod.DELETE);
+      expect(endpoints[1]?.expectedStatus).toBe(204);
     });
 
     it('should parse table with test scenarios', () => {
@@ -199,9 +211,10 @@ Test these endpoints:
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].testScenarios).toContain('success');
-      expect(endpoints[0].testScenarios).toContain('unauthorized');
-      expect(endpoints[0].testScenarios).toContain('invalid_credentials');
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[0]?.testScenarios).toContain('success');
+      expect(endpoints[0]?.testScenarios).toContain('unauthorized');
+      expect(endpoints[0]?.testScenarios).toContain('invalid_credentials');
     });
   });
 
@@ -231,9 +244,12 @@ Third endpoint in table:
       const endpoints = parser.parseEndpoints(description);
       
       expect(endpoints).toHaveLength(3);
-      expect(endpoints[0].url).toBe('/api/users');
-      expect(endpoints[1].url).toBe('/api/products');
-      expect(endpoints[2].url).toBe('/api/orders');
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[1]).toBeDefined();
+      expect(endpoints[2]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('/api/users');
+      expect(endpoints[1]?.url).toBe('/api/products');
+      expect(endpoints[2]?.url).toBe('/api/orders');
     });
   });
 
@@ -411,7 +427,8 @@ Third endpoint in table:
 
       const endpoints = parser.parseEndpoints(description);
       expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].url).toBe('/api/users');
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('/api/users');
     });
 
     it('should skip invalid YAML blocks', () => {
@@ -428,7 +445,8 @@ method: GET
 
       const endpoints = parser.parseEndpoints(description);
       expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].url).toBe('/api/users');
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('/api/users');
     });
 
     it('should handle full URLs', () => {
@@ -443,7 +461,8 @@ method: GET
 
       const endpoints = parser.parseEndpoints(description);
       expect(endpoints).toHaveLength(1);
-      expect(endpoints[0].url).toBe('https://api.example.com/users');
+      expect(endpoints[0]).toBeDefined();
+      expect(endpoints[0]?.url).toBe('https://api.example.com/users');
     });
 
     it('should handle various HTTP methods', () => {
@@ -461,7 +480,8 @@ method: GET
 
         const endpoints = parser.parseEndpoints(description);
         expect(endpoints).toHaveLength(1);
-        expect(endpoints[0].method).toBe(method);
+        expect(endpoints[0]).toBeDefined();
+        expect(endpoints[0]?.method).toBe(method);
       }
     });
 
@@ -487,7 +507,8 @@ method: GET
 
         const endpoints = parser.parseEndpoints(description);
         expect(endpoints).toHaveLength(1);
-        expect(endpoints[0].authType).toBe(expected);
+        expect(endpoints[0]).toBeDefined();
+        expect(endpoints[0]?.authType).toBe(expected);
       }
     });
   });
@@ -713,7 +734,8 @@ method: GET
       expect(result.endpoints).toHaveLength(1);
       expect(result.validationResults).toHaveLength(1);
       expect(result.hasErrors).toBe(false);
-      expect(result.validationResults[0].validation.valid).toBe(true);
+      expect(result.validationResults[0]).toBeDefined();
+      expect(result.validationResults[0]?.validation.valid).toBe(true);
     });
 
     it('should detect errors in endpoints', () => {
@@ -731,8 +753,9 @@ method: GET
       expect(result.endpoints).toHaveLength(0); // Invalid endpoints filtered out
       expect(result.validationResults).toHaveLength(1);
       expect(result.hasErrors).toBe(true);
-      expect(result.validationResults[0].validation.valid).toBe(false);
-      expect(result.validationResults[0].validation.errors).toContain('URL is required');
+      expect(result.validationResults[0]).toBeDefined();
+      expect(result.validationResults[0]?.validation.valid).toBe(false);
+      expect(result.validationResults[0]?.validation.errors).toContain('URL is required');
     });
 
     it('should handle mixed valid and invalid endpoints', () => {
@@ -760,8 +783,10 @@ method: GET
       expect(result.endpoints).toHaveLength(2); // Only valid endpoints
       expect(result.validationResults).toHaveLength(3); // All endpoints validated
       expect(result.hasErrors).toBe(true);
-      expect(result.endpoints[0].url).toBe('/api/users');
-      expect(result.endpoints[1].url).toBe('/api/products');
+      expect(result.endpoints[0]).toBeDefined();
+      expect(result.endpoints[1]).toBeDefined();
+      expect(result.endpoints[0]?.url).toBe('/api/users');
+      expect(result.endpoints[1]?.url).toBe('/api/products');
     });
 
     it('should return empty arrays when no endpoints found', () => {

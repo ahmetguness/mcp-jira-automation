@@ -27,19 +27,19 @@ describe("AI Provider Utilities", () => {
             expect(prompt).toContain("SAFE commands only");
         });
 
-        it("should include multi-language rules when requested", () => {
-            const prompt = buildSystemPrompt({ isMulti: true });
-            expect(prompt).toContain("MULTI-LANGUAGE REPOSITORY RULES");
-        });
-
-        it("should include specific overlay when primaryLanguage is provided", () => {
-            const prompt = buildSystemPrompt({ primaryLanguage: "python" });
-            expect(prompt).toContain("RUNTIME OVERLAY: Python");
-        });
-
-        it("should include unknown overlay by default", () => {
+        it("should always mandate Node.js for tests", () => {
             const prompt = buildSystemPrompt();
-            expect(prompt).toContain("RUNTIME OVERLAY: Unknown");
+            expect(prompt).toContain("ALL TESTS IN NODE.JS");
+        });
+
+        it("should include source code context for specified language", () => {
+            const prompt = buildSystemPrompt({ primaryLanguage: "python" });
+            expect(prompt).toContain("SOURCE CODE CONTEXT: Python");
+        });
+
+        it("should include unknown context by default", () => {
+            const prompt = buildSystemPrompt();
+            expect(prompt).toContain("SOURCE CODE CONTEXT: Unknown");
         });
     });
 

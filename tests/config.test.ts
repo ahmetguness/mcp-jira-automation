@@ -108,5 +108,69 @@ describe("Config Utilities", () => {
             expect(config.requireApproval).toBe(false);
             expect(config.maxAttempts).toBe(3);
         });
+
+        it("should load requireApproval as true when REQUIRE_APPROVAL is 'true'", async () => {
+            process.env.JIRA_BASE_URL = "https://test.atlassian.net";
+            process.env.JIRA_EMAIL = "bot@test.com";
+            process.env.JIRA_API_TOKEN = "test-token";
+            process.env.JIRA_PROJECT_KEY = "TEST";
+            process.env.SCM_PROVIDER = "github";
+            process.env.AI_PROVIDER = "openai";
+            process.env.MODE = "poll";
+            process.env.REQUIRE_APPROVAL = "true";
+
+            const { loadConfig } = await import("../src/config.js");
+            const config = loadConfig();
+
+            expect(config.requireApproval).toBe(true);
+        });
+
+        it("should load requireApproval as false when REQUIRE_APPROVAL is 'false'", async () => {
+            process.env.JIRA_BASE_URL = "https://test.atlassian.net";
+            process.env.JIRA_EMAIL = "bot@test.com";
+            process.env.JIRA_API_TOKEN = "test-token";
+            process.env.JIRA_PROJECT_KEY = "TEST";
+            process.env.SCM_PROVIDER = "github";
+            process.env.AI_PROVIDER = "openai";
+            process.env.MODE = "poll";
+            process.env.REQUIRE_APPROVAL = "false";
+
+            const { loadConfig } = await import("../src/config.js");
+            const config = loadConfig();
+
+            expect(config.requireApproval).toBe(false);
+        });
+
+        it("should default requireApproval to false when REQUIRE_APPROVAL is not set", async () => {
+            process.env.JIRA_BASE_URL = "https://test.atlassian.net";
+            process.env.JIRA_EMAIL = "bot@test.com";
+            process.env.JIRA_API_TOKEN = "test-token";
+            process.env.JIRA_PROJECT_KEY = "TEST";
+            process.env.SCM_PROVIDER = "github";
+            process.env.AI_PROVIDER = "openai";
+            process.env.MODE = "poll";
+            delete process.env.REQUIRE_APPROVAL;
+
+            const { loadConfig } = await import("../src/config.js");
+            const config = loadConfig();
+
+            expect(config.requireApproval).toBe(false);
+        });
+
+        it("should handle case-insensitive REQUIRE_APPROVAL values", async () => {
+            process.env.JIRA_BASE_URL = "https://test.atlassian.net";
+            process.env.JIRA_EMAIL = "bot@test.com";
+            process.env.JIRA_API_TOKEN = "test-token";
+            process.env.JIRA_PROJECT_KEY = "TEST";
+            process.env.SCM_PROVIDER = "github";
+            process.env.AI_PROVIDER = "openai";
+            process.env.MODE = "poll";
+            process.env.REQUIRE_APPROVAL = "TRUE";
+
+            const { loadConfig } = await import("../src/config.js");
+            const config = loadConfig();
+
+            expect(config.requireApproval).toBe(true);
+        });
     });
 });

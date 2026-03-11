@@ -14,7 +14,11 @@ describe('ApiTestOrchestrator', () => {
   beforeEach(() => {
     // Mock global.fetch to prevent real HTTP requests and Chinese error messages
     global.fetch = vi.fn((url: string | URL | Request) => {
-      const urlString = typeof url === 'string' ? url : url.toString();
+      const urlString = typeof url === 'string' 
+        ? url 
+        : url instanceof Request 
+          ? url.url 
+          : url.toString();
       
       // Mock Jira API comment posting
       if (urlString.includes('/rest/api/3/issue/') && urlString.includes('/comment')) {
@@ -22,10 +26,10 @@ describe('ApiTestOrchestrator', () => {
         return Promise.resolve({
           ok: false,
           status: 404,
-          text: async () => JSON.stringify({
+          text: () => Promise.resolve(JSON.stringify({
             errorMessages: ["Issue does not exist or you do not have permission to view it."],
             errors: {}
-          }),
+          })),
         } as Response);
       }
       
@@ -33,9 +37,9 @@ describe('ApiTestOrchestrator', () => {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: async () => ({}),
+        json: () => Promise.resolve({}),
       } as Response);
-    }) as any;
+    });
 
     orchestrator = new ApiTestOrchestrator({
       jira: {

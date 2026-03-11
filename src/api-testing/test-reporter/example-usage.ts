@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Example usage of TestReporter
  * Feature: api-endpoint-testing-transformation
