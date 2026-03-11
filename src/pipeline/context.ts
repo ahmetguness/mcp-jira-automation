@@ -60,7 +60,21 @@ export async function buildTaskContext(
     try {
         allFiles = await scm.listFiles(repo, undefined, branch);
     } catch (e) {
-        log.warn(`Failed to fetch test files: ${String(e)}. Will try to read known file patterns.`);
+        log.warn(`Failed to list files: ${String(e)}. Will try to read known context files.`);
+    }
+    
+    // If no files found (empty repo or listing failed), try known context files
+    if (allFiles.length === 0) {
+        log.warn(`No files found in repository. Will try to read known context files.`);
+        // Include both root and common monorepo paths
+        const fallbackFiles = [
+            ...CONTEXT_FILES,
+            ...CONTEXT_FILES.map(f => `backend/${f}`),
+            ...CONTEXT_FILES.map(f => `server/${f}`),
+            ...CONTEXT_FILES.map(f => `api/${f}`),
+            ...CONTEXT_FILES.map(f => `frontend/${f}`),
+        ];
+        allFiles = fallbackFiles;
     }
 
     // Categorize files
@@ -106,6 +120,12 @@ export async function buildTaskContext(
 
     log.info(`Detected runtime: ${runtimeSelection.primary} (isMulti: ${runtimeSelection.isMulti})`);
 
+    // Detect workdir from project structure (for monorepos)
+    const workdirInfo = detectWorkdirFromFiles(allFiles);
+    if (workdirInfo.workdirRelative) {
+        log.info(`Detected monorepo structure: workdir=${workdirInfo.workdirRelative}`);
+    }
+
     return {
         issue,
         repo: repoInfo,
@@ -114,6 +134,8 @@ export async function buildTaskContext(
         runtime: runtimeSelection.primary,
         hasMultipleLanguages: runtimeSelection.isMulti,
         runtimeSelection,
+        workdir: workdirInfo.workdir,
+        workdirRelative: workdirInfo.workdirRelative,
     };
 }
 
@@ -129,6 +151,27 @@ export function extractMentionedFiles(description: string, allFiles: string[]): 
         }
     }
     return mentioned;
+}
+
+/** Detect working directory from project structure (for monorepos) */
+function detectWorkdirFromFiles(allFiles: string[]): { workdir: string; workdirRelative?: string } {
+    // Look for common monorepo patterns
+    const patterns = [
+        { marker: "backend/package.json", workdir: "/workspace/backend", relative: "backend" },
+        { marker: "server/package.json", workdir: "/workspace/server", relative: "server" },
+        { marker: "api/package.json", workdir: "/workspace/api", relative: "api" },
+        { marker: "packages/server/package.json", workdir: "/workspace/packages/server", relative: "packages/server" },
+        { marker: "apps/api/package.json", workdir: "/workspace/apps/api", relative: "apps/api" },
+    ];
+
+    for (const pattern of patterns) {
+        if (allFiles.includes(pattern.marker)) {
+            return { workdir: pattern.workdir, workdirRelative: pattern.relative };
+        }
+    }
+
+    // Default to root
+    return { workdir: "/workspace" };
 }
 
 /** Read files with size limiting */

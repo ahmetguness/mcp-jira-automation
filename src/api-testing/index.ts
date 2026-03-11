@@ -18,7 +18,7 @@ export * from './repository-resolver/index.js';
 export * from './context-retrieval/index.js';
 export * from './test-script-generator/index.js';
 export * from './test-executor/index.js';
-export * from './test-reporter/index.js';
+export * from './reporting/ReportingManager.js';
 export * from './approval-manager/index.js';
 export * from './credential-manager/index.js';
 

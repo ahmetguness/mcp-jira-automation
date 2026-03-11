@@ -154,6 +154,26 @@ function validateNpx(tokens: string[], policy: ExecPolicy): boolean {
     return NPX_SAFE_TOOLS.has(tool);
 }
 
+/** node - allow test file execution */
+function validateNode(tokens: string[], policy: ExecPolicy): boolean {
+    const file = tokens[1];
+    if (!file) return false;
+    
+    // In strict mode, only allow test files
+    if (policy === "strict") {
+        // Allow test-*.js, *.test.js, *.spec.js, tests/*.js
+        const isTestFile = /^(test-[\w-]+\.js|[\w-]+\.(test|spec)\.js|tests\/[\w-]+\.js)$/.test(file);
+        if (!isTestFile) {
+            return false;
+        }
+    }
+    
+    // Check for safe filename (no path traversal, no special chars)
+    if (!/^[\w/.-]+\.js$/.test(file)) return false;
+    
+    return true;
+}
+
 const ALLOWLIST: AllowedCommand[] = [
     { bin: "npm", subcommands: ["ci", "install", "test", "run"], validate: validateNpm },
     { bin: "pnpm", subcommands: ["install", "test", "run"], validate: () => true },
@@ -161,9 +181,8 @@ const ALLOWLIST: AllowedCommand[] = [
     { bin: "bun", subcommands: ["install", "test", "run"], validate: () => true },
     { bin: "npx", validate: validateNpx },
     
-    // Node.js direct execution - removed standalone flag to enforce strict mode blocking
-    // In strict mode, node commands with arguments should be blocked
-    // In permissive mode, they are allowed (no forbidden chars check passes)
+    // Node.js direct execution - allow test files in strict mode
+    { bin: "node", validate: validateNode },
 
     // Python
     { bin: "python", subcommands: ["-m"], validate: validatePython },

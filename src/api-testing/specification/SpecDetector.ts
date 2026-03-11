@@ -15,7 +15,7 @@ const log = createLogger('api-testing:spec-detector');
 
 export class SpecDetector {
   /**
-   * Parse API specifications from files retrieved by ContextRetrieval
+   * Parse API specifications from files retrieved by RepositoryContextBuilder
    * 
    * @param files - Array of FileContent objects containing OpenAPI/Swagger/Postman specs
    * @returns Array of normalized EndpointSpec objects

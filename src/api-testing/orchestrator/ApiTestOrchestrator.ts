@@ -25,9 +25,10 @@ import { RepositoryResolver, type RepositoryResolverConfig } from '../repository
 import { ApprovalManager } from '../approval-manager/ApprovalManager.js';
 import { TestScriptGenerator } from '../test-script-generator/TestScriptGenerator.js';
 import { TestExecutor } from '../test-executor/TestExecutor.js';
-import { TestReporter } from '../test-reporter/TestReporter.js';
-import { ContextRetrieval } from '../context-retrieval/ContextRetrieval.js';
+import { ReportingManager } from '../reporting/ReportingManager.js';
+import { RepositoryContextBuilder } from '../context-retrieval/RepositoryContextBuilder.js';
 import { SpecDetector } from '../specification/SpecDetector.js';
+import { TaskAnalyzer } from '../task-analyzer/TaskAnalyzer.js';
 import { TestStrategyManager, type TestPlan } from '../strategy/TestStrategyManager.js';
 import { createLogger } from '../../logger.js';
 import type { Config } from '../../config.js';
@@ -111,9 +112,10 @@ export class ApiTestOrchestrator {
   private approvalManager: ApprovalManager;
   private testScriptGenerator: TestScriptGenerator;
   private testExecutor: TestExecutor;
-  private testReporter: TestReporter;
-  private contextRetrieval: ContextRetrieval;
+  private reportingManager: ReportingManager;
+  private contextRetrieval: RepositoryContextBuilder;
   private specDetector: SpecDetector;
+  private taskAnalyzer: TaskAnalyzer;
   private strategyManager: TestStrategyManager;
   private isRunning: boolean = false;
 
@@ -127,16 +129,17 @@ export class ApiTestOrchestrator {
     
     this.testScriptGenerator = new TestScriptGenerator(config.appConfig);
     this.testExecutor = new TestExecutor();
-    this.testReporter = new TestReporter({
+    this.reportingManager = new ReportingManager({
       jiraBaseUrl: config.jira.jiraBaseUrl,
       jiraEmail: config.jira.jiraEmail,
       jiraApiToken: config.jira.jiraApiToken,
       scmProvider: undefined // Will be set in app.ts if SCM exists
     });
 
-    this.contextRetrieval = new ContextRetrieval();
+    this.contextRetrieval = new RepositoryContextBuilder();
     this.specDetector = new SpecDetector();
     this.strategyManager = new TestStrategyManager();
+    this.taskAnalyzer = new TaskAnalyzer(this.repositoryResolver);
     
     // Initialize approval manager
     this.approvalManager = new ApprovalManager({
@@ -203,61 +206,66 @@ export class ApiTestOrchestrator {
     log.info(`Processing task ${task.key}`, { summary: task.summary });
 
     let currentStage = PipelineStage.TASK_RECEIVED;
+    let endpoints: EndpointSpec[] = [];
 
     try {
-      // Stage 1: Parse endpoints from task description
+      // Stage 1: Analyze Task Requirements
       currentStage = PipelineStage.PARSING;
-      log.debug(`[${task.key}] Stage: Parsing endpoints`);
+      log.debug(`[${task.key}] Stage: Analyzing task`);
       
-      const parseResult = this.endpointParser.parseAndValidateEndpoints(task.description);
+      const analysisResult = this.taskAnalyzer.analyzeTask(task);
       
-      // Stage 2: Validate endpoints
-      currentStage = PipelineStage.VALIDATION;
-      log.debug(`[${task.key}] Stage: Validating endpoints`);
-      
-      if (parseResult.hasErrors) {
-        // Report validation errors to Jira
-        await this.reportValidationErrors(task, parseResult.validationResults);
-        
-        return {
-          taskKey: task.key,
-          success: false,
-          stage: PipelineStage.VALIDATION,
-          error: 'Endpoint validation failed',
-        };
-      }
-
-      if (parseResult.endpoints.length === 0) {
-        await this.reportNoEndpointsFound(task);
-        
+      if (!analysisResult.isValid) {
+        await this.reportTaskAnalysisErrors(task, analysisResult.errors);
         return {
           taskKey: task.key,
           success: false,
           stage: PipelineStage.PARSING,
-          error: 'No valid endpoints found in task description',
+          error: 'Task analysis failed',
+          endpoints: [],
         };
       }
 
-      log.info(`[${task.key}] Parsed ${parseResult.endpoints.length} endpoint(s)`);
+      // Stage 2: Parse endpoints from task description if required
+      currentStage = PipelineStage.PARSING;
+
+      if (analysisResult.requiresEndpointParsing) {
+        log.debug(`[${task.key}] Stage: Parsing endpoints`);
+        const parseResult = this.endpointParser.parseAndValidateEndpoints(analysisResult.normalizedDescription);
+        
+        // Validation check
+        if (parseResult.hasErrors) {
+          await this.reportValidationErrors(task, parseResult.validationResults);
+          return { taskKey: task.key, success: false, stage: PipelineStage.VALIDATION, error: 'Endpoint validation failed', endpoints: parseResult.endpoints };
+        }
+
+        if (parseResult.endpoints.length === 0) {
+          await this.reportNoEndpointsFound(task);
+          return { taskKey: task.key, success: false, stage: PipelineStage.PARSING, error: 'No valid endpoints found in task description', endpoints: [] };
+        }
+        
+        endpoints = parseResult.endpoints;
+        log.info(`[${task.key}] Parsed ${endpoints.length} endpoint(s)`);
+      }
 
       // Stage 3: Resolve repository
       currentStage = PipelineStage.REPOSITORY_RESOLUTION;
       log.debug(`[${task.key}] Stage: Resolving repository`);
       
-      const repository = this.resolveRepository(task);
+      const repository = analysisResult.repository ?? this.resolveRepository(task);
       log.info(`[${task.key}] Resolved repository: ${repository.url}`);
 
       // Stage 4: Retrieve context
       currentStage = PipelineStage.CONTEXT_RETRIEVAL;
       log.debug(`[${task.key}] Stage: Retrieving context`);
       
-      const context = await this.retrieveContext(repository, parseResult.endpoints);
+      const context = await this.retrieveContext(repository, endpoints);
       log.info(`[${task.key}] Retrieved context: ${context.apiSpecifications.length} API specs, ${context.existingTests.length} existing tests`);
 
       // Stage 4.5: Construct test plan
       log.debug(`[${task.key}] Stage: Constructing test plan`);
       const discoveredSpecs = this.specDetector.parseSpecifications(context.apiSpecifications);
-      const testPlan = this.strategyManager.generateTestPlan(parseResult.endpoints, discoveredSpecs, context);
+      const testPlan = this.strategyManager.generateTestPlan(endpoints, discoveredSpecs, context);
 
       // Stage 5: Generate tests
       currentStage = PipelineStage.TEST_GENERATION;
@@ -273,7 +281,7 @@ export class ApiTestOrchestrator {
         
         await this.approvalManager.requestApproval(
           task.key,
-          parseResult.endpoints,
+          endpoints,
           generatedTests
         );
         
@@ -291,7 +299,7 @@ export class ApiTestOrchestrator {
       currentStage = PipelineStage.TEST_EXECUTION;
       log.debug(`[${task.key}] Stage: Executing tests`);
       
-      const testResults = await this.executeTests(generatedTests, repository);
+      const testResults = await this.executeTests(generatedTests, repository, context);
       log.info(`[${task.key}] Tests executed: ${testResults.passedTests}/${testResults.totalTests} passed`);
 
       // Stage 7: Report results
@@ -309,7 +317,7 @@ export class ApiTestOrchestrator {
         taskKey: task.key,
         success: true,
         stage: PipelineStage.COMPLETED,
-        endpoints: parseResult.endpoints,
+        endpoints: endpoints,
         repository,
         testResults,
       };
@@ -327,6 +335,7 @@ export class ApiTestOrchestrator {
         success: false,
         stage: currentStage,
         error: errorMessage,
+        endpoints: endpoints,
       };
     }
   }
@@ -405,7 +414,8 @@ export class ApiTestOrchestrator {
    */
   private async executeTests(
     _generatedTests: GeneratedTests,
-    _repository: RepositoryInfo
+    _repository: RepositoryInfo,
+    _context?: TestContext
   ): Promise<TestResults> {
     log.info('Executing tests...');
     
@@ -421,7 +431,7 @@ export class ApiTestOrchestrator {
       allowDestructiveOps: this.config.execution?.allowDestructiveOps ?? false,
     };
 
-    return await this.testExecutor.executeTests(_generatedTests, executionConfig);
+    return await this.testExecutor.executeTests(_generatedTests, executionConfig, _context);
   }
 
   /**
@@ -437,20 +447,36 @@ export class ApiTestOrchestrator {
     log.info(`Reporting test results for task ${_task.key}...`);
     
     // Post to Jira
-    await this.testReporter.reportToJira(_task.key, _testResults);
+    await this.reportingManager.reportToJira(_task.key, _testResults);
     
     // Update issue state
-    await this.testReporter.updateTaskStatus(_task.key, _testResults);
+    await this.reportingManager.updateTaskStatus(_task.key, _testResults);
 
     // Commit to SCM if commit config is provided and there are test files
     if (this.config.commit && _generatedTests.testFiles.length > 0) {
-      await this.testReporter.commitToScm(
+      await this.reportingManager.commitToScm(
         _repository, 
         _generatedTests.testFiles, 
         _testResults, 
         this.config.commit as CommitConfig, 
         _task.key
       );
+    }
+  }
+
+  /**
+   * Report task analysis errors to Jira
+   */
+  private async reportTaskAnalysisErrors(task: JiraTask, errors: string[]): Promise<void> {
+    log.info(`Reporting task analysis errors to Jira for task ${task.key}`);
+    
+    const comment = `❌ *Task Analysis Failed*\n\nThe following errors were found:\n${errors.map(e => `- ${e}`).join('\n')}\n\nPlease correct the task and try again.`;
+    
+    try {
+      await this.postJiraComment(task.key, comment);
+      await this.addJiraLabel(task.key, 'invalid-task');
+    } catch (err) {
+      log.error(`Failed to report task analysis errors to Jira for ${task.key}`);
     }
   }
 

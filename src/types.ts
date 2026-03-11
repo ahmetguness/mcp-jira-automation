@@ -41,6 +41,10 @@ export interface TaskContext {
     runtime?: string;
     hasMultipleLanguages?: boolean;
     runtimeSelection?: RuntimeSelectionResult;
+    /** Working directory where the main project is located (e.g., "/workspace/backend" for monorepos) */
+    workdir?: string;
+    /** Relative path from repo root to working directory (e.g., "backend" for monorepos) */
+    workdirRelative?: string;
 }
 
 // ─── AI ──────────────────────────────────────────────────────

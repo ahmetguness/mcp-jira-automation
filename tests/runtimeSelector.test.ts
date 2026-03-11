@@ -7,7 +7,7 @@ describe("Runtime Selector", () => {
             const result = determineRuntime(["src/main.py"], [], []);
             expect(result.primary).toBe("python");
             expect(result.isMulti).toBe(false);
-            expect(result.detected[0].lang).toBe("python");
+            expect(result.detected![0]?.lang).toBe("python");
         });
 
         it("detects node from tests if source is ambiguous or missing", () => {

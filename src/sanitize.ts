@@ -37,15 +37,16 @@ const OWNER_REPO_REGEX = /^[\w.-]+\/[\w.-]+$/;
 /**
  * Validate a git repository URL.
  * Allows: https://(github.com|gitlab.com|bitbucket.org)/... or owner/repo format.
+ * Converts owner/repo format to https://github.com/owner/repo for git clone compatibility.
  * @throws if the URL does not match a known safe pattern
  */
 export function validateRepoUrl(url: string): string {
     const trimmed = url.trim();
     if (!trimmed) throw new Error("Repository URL cannot be empty");
 
-    // Allow owner/repo format (no URL)
+    // Allow owner/repo format (no URL) - convert to full GitHub URL
     if (OWNER_REPO_REGEX.test(trimmed)) {
-        return trimmed;
+        return `https://github.com/${trimmed}`;
     }
 
     // Must be https URL from an allowed host
@@ -64,6 +65,7 @@ export function validateRepoUrl(url: string): string {
         throw new Error(`Invalid repository URL format`, { cause: e });
     }
 }
+
 
 // ─── Patch Path ──────────────────────────────────────────────
 

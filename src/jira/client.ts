@@ -37,11 +37,17 @@ export class JiraClient {
     }
 
     /** Get a single issue by key */
-    async getIssue(issueKey: string): Promise<JiraIssue> {
+    async getIssue(issueKey: string, fields?: string): Promise<JiraIssue> {
         log.debug(`Getting issue ${issueKey}`);
-        const rawResult = await this.mcp.callJiraTool("jira_get_issue", {
+        const params: { issue_key: string; fields?: string } = {
             issue_key: issueKey,
-        });
+        };
+        
+        if (fields) {
+            params.fields = fields;
+        }
+        
+        const rawResult = await this.mcp.callJiraTool("jira_get_issue", params);
 
         const result = parseJiraIssue(rawResult);
 
@@ -57,20 +63,50 @@ export class JiraClient {
         try {
             log.info("Auto-detecting repository custom field...");
             
-            // Get all fields from Jira
-            const rawResult = await this.mcp.callJiraTool("jira_get_fields", {});
-            const fields = Array.isArray(rawResult) ? rawResult : [];
+            // Try searching for "repository" first
+            let rawResult = await this.mcp.callJiraTool("jira_search_fields", {
+                keyword: "repository",
+            });
+            
+            let fields: unknown[] = Array.isArray(rawResult) ? rawResult : 
+                        (rawResult && typeof rawResult === 'object' && 'fields' in rawResult) ? 
+                        (rawResult as { fields: unknown }).fields as unknown[] : [];
+            
+            if (!Array.isArray(fields)) {
+                fields = [];
+            }
+            
+            log.info(`Found ${fields.length} fields matching 'repository'`);
 
-            // Search for fields with "repository" or "repo" in name (case-insensitive)
+            // If no results, try "repo" as well
+            if (fields.length === 0) {
+                log.info("No fields found for 'repository', trying 'repo'...");
+                rawResult = await this.mcp.callJiraTool("jira_search_fields", {
+                    keyword: "repo",
+                });
+                
+                fields = Array.isArray(rawResult) ? rawResult : 
+                        (rawResult && typeof rawResult === 'object' && 'fields' in rawResult) ? 
+                        (rawResult as { fields: unknown }).fields as unknown[] : [];
+                
+                if (!Array.isArray(fields)) {
+                    fields = [];
+                }
+                
+                log.info(`Found ${fields.length} fields matching 'repo'`);
+            }
+
+            // Search for custom fields with "repository" or "repo" in name
             const repoField = fields.find((field: unknown) => {
                 if (!field || typeof field !== 'object') return false;
                 const fieldObj = field as Record<string, unknown>;
                 const name = typeof fieldObj.name === 'string' ? fieldObj.name.toLowerCase() : '';
                 const id = typeof fieldObj.id === 'string' ? fieldObj.id : '';
-                return (
-                    id.startsWith("customfield_") &&
-                    (name.includes("repository") || name.includes("repo"))
-                );
+                const isCustom = typeof fieldObj.custom === 'boolean' ? fieldObj.custom : id.startsWith("customfield_");
+                
+                log.info(`  Field: ${fieldObj.name} (${id}) - custom: ${isCustom}`);
+                
+                return isCustom && (name.includes("repository") || name.includes("repo"));
             });
 
             if (repoField && typeof repoField === 'object') {
@@ -80,7 +116,7 @@ export class JiraClient {
                 
                 if (fieldId) {
                     this.cachedRepoFieldId = fieldId;
-                    log.info(`Auto-detected repository field: ${fieldName} (${fieldId})`);
+                    log.info(`✅ Auto-detected repository field: ${fieldName} (${fieldId})`);
                     return fieldId;
                 }
             }
@@ -104,9 +140,12 @@ export class JiraClient {
         }
 
         if (fieldId) {
+            log.info(`Fetching issue ${issueKey} with custom field ${fieldId}`);
             const rawResult = await this.mcp.callJiraTool("jira_get_issue", {
                 issue_key: issueKey,
+                fields: fieldId,
             });
+            log.debug(`Raw result from jira_get_issue: ${JSON.stringify(rawResult)}`);
             const result = parseJiraIssue(rawResult);
 
             const value =
@@ -115,8 +154,28 @@ export class JiraClient {
                 null;
 
             if (value) {
-                return normalizeRepoUrl(typeof value === "string" ? value : JSON.stringify(value));
+                log.info(`Found repository in custom field ${fieldId}: ${JSON.stringify(value)}`);
+                
+                // Handle different value formats from Jira
+                let repoValue: string;
+                if (typeof value === "string") {
+                    repoValue = value;
+                } else if (value && typeof value === "object" && "value" in value) {
+                    // Handle Jira select field format: {value: "owner/repo"}
+                    repoValue = String((value as { value: unknown }).value);
+                    log.info(`Extracted repository value from Jira select field: ${repoValue}`);
+                } else {
+                    // Fallback: stringify the object
+                    repoValue = JSON.stringify(value);
+                    log.warn(`Repository field has unexpected format, using stringified value: ${repoValue}`);
+                }
+                
+                return normalizeRepoUrl(repoValue);
+            } else {
+                log.warn(`Custom field ${fieldId} exists but has no value or was not returned by API`);
             }
+        } else {
+            log.info("No repository custom field configured or detected, falling back to description parsing");
         }
 
         // Fallback: parse from description

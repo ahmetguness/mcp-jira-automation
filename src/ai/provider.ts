@@ -86,7 +86,50 @@ export function buildSystemPrompt(options: { primaryLanguage?: string; isMulti?:
   return prompt;
 }
 
-/** Build the user prompt from TaskContext */
+/**
+ * Detect module system from package.json in context.sourceFiles
+ * @param context - TaskContext containing sourceFiles array
+ * @returns "esm" if package.json has "type": "module", otherwise "commonjs"
+ */
+export function detectModuleSystem(context: TaskContext): "esm" | "commonjs" {
+  // Find package.json in sourceFiles array
+  // Handle monorepo case: match workdirRelative path if present
+  let packageJsonFile = undefined;
+  
+  if (context.workdirRelative) {
+    // Monorepo: look for package.json in the working directory
+    const workdirPackageJson = `${context.workdirRelative}/package.json`;
+    packageJsonFile = context.sourceFiles.find(
+      f => f.path === workdirPackageJson || f.path === `${workdirPackageJson}`
+    );
+  }
+  
+  // If not found in workdir or no workdir, look for root package.json
+  if (!packageJsonFile) {
+    packageJsonFile = context.sourceFiles.find(f => f.path === "package.json");
+  }
+  
+  // Default to commonjs if no package.json found
+  if (!packageJsonFile) {
+    return "commonjs";
+  }
+  
+  // Safely parse JSON with try-catch
+  try {
+    const parsed = JSON.parse(packageJsonFile.content);
+    
+    // Check if parsed.type === "module"
+    if (parsed.type === "module") {
+      return "esm";
+    }
+    
+    return "commonjs";
+  } catch (error) {
+    // Default to commonjs on parse error
+    return "commonjs";
+  }
+}
+
 export function buildUserPrompt(context: TaskContext): string {
   let prompt = `## Jira Issue: ${context.issue.key}\n`;
   prompt += `**Title:** ${context.issue.summary}\n`;
@@ -123,8 +166,26 @@ export function buildUserPrompt(context: TaskContext): string {
     prompt += `multi_language_repo: ${rs.isMulti}\n\n`;
   }
 
+  // Add module system information only for ES module repositories
+  const moduleSystem = detectModuleSystem(context);
+  if (moduleSystem === "esm") {
+    prompt += `## Module System\n`;
+    prompt += `module_system: esm\n`;
+    prompt += `**CRITICAL:** Generate test files using ES module syntax (import/export statements).\n`;
+    prompt += `\n`;
+  }
+
   prompt += `## Repository: ${context.repo.name}\n`;
   prompt += `**Default Branch:** ${context.repo.defaultBranch}\n\n`;
+
+  // Add workdir information for monorepos
+  if (context.workdirRelative) {
+    prompt += `## Project Structure\n`;
+    prompt += `**Working Directory:** ${context.workdirRelative}\n`;
+    prompt += `**Note:** This is a monorepo. The main project is located in the \`${context.workdirRelative}\` directory.\n`;
+    prompt += `**IMPORTANT:** When creating or modifying files, use paths relative to the repository root.\n`;
+    prompt += `For example, to create a test file in the working directory, use: \`${context.workdirRelative}/test-api.js\`\n\n`;
+  }
 
   if (context.sourceFiles.length > 0) {
     prompt += `## Source Files\n\n`;

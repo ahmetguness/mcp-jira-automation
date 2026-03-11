@@ -52,6 +52,20 @@ describe("Execution Policy", () => {
             expect(isCommandAllowed("wget file", "strict")).toBe(false);
             expect(isCommandAllowed("python setup.py install", "strict")).toBe(false);
         });
+
+        it("should allow node test files in strict mode", () => {
+            expect(isCommandAllowed("node test-api.js", "strict")).toBe(true);
+            expect(isCommandAllowed("node test-auth.js", "strict")).toBe(true);
+            expect(isCommandAllowed("node api.test.js", "strict")).toBe(true);
+            expect(isCommandAllowed("node auth.spec.js", "strict")).toBe(true);
+            expect(isCommandAllowed("node tests/api.js", "strict")).toBe(true);
+        });
+
+        it("should block non-test node files in strict mode", () => {
+            expect(isCommandAllowed("node server.js", "strict")).toBe(false);
+            expect(isCommandAllowed("node index.js", "strict")).toBe(false);
+            expect(isCommandAllowed("node app.js", "strict")).toBe(false);
+        });
     });
 
     // ── Permissive Mode ──────────────────────────────────

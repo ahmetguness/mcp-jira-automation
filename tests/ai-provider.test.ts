@@ -3,6 +3,7 @@ import {
     buildSystemPrompt,
     buildUserPrompt,
     parseAiResponse,
+    detectModuleSystem,
 } from "../src/ai/provider.js";
 import type { TaskContext } from "../src/types.js";
 
@@ -44,6 +45,97 @@ describe("AI Provider Utilities", () => {
     });
 
     // ── buildUserPrompt ──────────────────────────────────
+
+    describe("detectModuleSystem", () => {
+        const baseContext: TaskContext = {
+            issue: {
+                key: "TEST-1",
+                summary: "Test",
+                description: "",
+                status: "Open",
+                issueType: "Task",
+                assignee: "test",
+                repository: "test/repo",
+            },
+            repo: {
+                name: "test/repo",
+                defaultBranch: "main",
+            },
+            sourceFiles: [],
+            testFiles: [],
+        };
+
+        it("should return 'esm' when package.json has type: module", () => {
+            const context: TaskContext = {
+                ...baseContext,
+                sourceFiles: [
+                    { path: "package.json", content: '{"type": "module"}' },
+                ],
+            };
+            expect(detectModuleSystem(context)).toBe("esm");
+        });
+
+        it("should return 'commonjs' when package.json has type: commonjs", () => {
+            const context: TaskContext = {
+                ...baseContext,
+                sourceFiles: [
+                    { path: "package.json", content: '{"type": "commonjs"}' },
+                ],
+            };
+            expect(detectModuleSystem(context)).toBe("commonjs");
+        });
+
+        it("should return 'commonjs' when package.json has no type field", () => {
+            const context: TaskContext = {
+                ...baseContext,
+                sourceFiles: [
+                    { path: "package.json", content: '{"name": "test"}' },
+                ],
+            };
+            expect(detectModuleSystem(context)).toBe("commonjs");
+        });
+
+        it("should return 'commonjs' when no package.json exists", () => {
+            const context: TaskContext = {
+                ...baseContext,
+                sourceFiles: [],
+            };
+            expect(detectModuleSystem(context)).toBe("commonjs");
+        });
+
+        it("should return 'commonjs' when package.json is malformed", () => {
+            const context: TaskContext = {
+                ...baseContext,
+                sourceFiles: [
+                    { path: "package.json", content: 'invalid json {' },
+                ],
+            };
+            expect(detectModuleSystem(context)).toBe("commonjs");
+        });
+
+        it("should handle monorepo with workdirRelative", () => {
+            const context: TaskContext = {
+                ...baseContext,
+                workdirRelative: "backend",
+                sourceFiles: [
+                    { path: "backend/package.json", content: '{"type": "module"}' },
+                    { path: "package.json", content: '{"type": "commonjs"}' },
+                ],
+            };
+            expect(detectModuleSystem(context)).toBe("esm");
+        });
+
+        it("should fallback to root package.json if workdir package.json not found", () => {
+            const context: TaskContext = {
+                ...baseContext,
+                workdirRelative: "backend",
+                sourceFiles: [
+                    { path: "package.json", content: '{"type": "module"}' },
+                ],
+            };
+            expect(detectModuleSystem(context)).toBe("esm");
+        });
+    });
 
     describe("buildUserPrompt", () => {
         const baseContext: TaskContext = {

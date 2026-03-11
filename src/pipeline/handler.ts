@@ -319,16 +319,32 @@ export class PipelineHandler {
 
     /** Build clone URL for the repository */
     private buildCloneUrl(repo: string): string {
+        log.info(`Building clone URL from repository value: "${repo}"`);
+        
+        // If repo is already a full URL, return it as-is
+        if (repo.startsWith('https://') || repo.startsWith('http://')) {
+            log.info(`Repository is already a full URL: ${repo}`);
+            return repo;
+        }
+        
+        // Otherwise, build URL based on SCM provider
+        let cloneUrl: string;
         switch (this.config.scmProvider) {
             case "github":
-                return `https://github.com/${repo}.git`;
+                cloneUrl = `https://github.com/${repo}.git`;
+                break;
             case "gitlab":
-                return `${this.config.gitlabUrl}/${repo}.git`;
+                cloneUrl = `${this.config.gitlabUrl}/${repo}.git`;
+                break;
             case "bitbucket":
-                return `https://bitbucket.org/${repo}.git`;
+                cloneUrl = `https://bitbucket.org/${repo}.git`;
+                break;
             default:
-                return `https://github.com/${repo}.git`;
+                cloneUrl = `https://github.com/${repo}.git`;
         }
+        
+        log.info(`Built clone URL: ${cloneUrl}`);
+        return cloneUrl;
     }
 }
 

@@ -47,3 +47,11 @@ export enum ScmProvider {
   GITLAB = 'gitlab',
   BITBUCKET = 'bitbucket',
 }
+
+export enum DatabaseType {
+  MONGODB = 'mongodb',
+  POSTGRESQL = 'postgresql',
+  MYSQL = 'mysql',
+  REDIS = 'redis',
+  SQLITE = 'sqlite',
+}

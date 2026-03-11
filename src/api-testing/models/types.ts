@@ -10,10 +10,11 @@ import {
   Environment,
   TestStatus,
   ScmProvider,
+  DatabaseType,
 } from './enums.js';
 
 // Re-export enums for convenience
-export { HttpMethod, AuthType, TestFramework, Environment, TestStatus, ScmProvider };
+export { HttpMethod, AuthType, TestFramework, Environment, TestStatus, ScmProvider, DatabaseType };
 
 /**
  * Represents a Jira task with all relevant information
@@ -58,6 +59,18 @@ export interface RepositoryInfo {
 }
 
 /**
+ * Result of task analysis prior to endpoint parsing
+ */
+export interface TaskAnalysisResult {
+  isValid: boolean;
+  requiresEndpointParsing: boolean;
+  repository?: RepositoryInfo;
+  normalizedDescription: string;
+  errors: string[];
+  warnings: string[];
+}
+
+/**
  * Content of a file retrieved from repository
  */
 export interface FileContent {
@@ -75,6 +88,7 @@ export interface TestContext {
   documentation: FileContent[];
   configurationFiles: FileContent[];
   detectedFramework?: TestFramework;
+  detectedDatabases?: DatabaseType[];
   repositoryInfo: RepositoryInfo;
 }
 

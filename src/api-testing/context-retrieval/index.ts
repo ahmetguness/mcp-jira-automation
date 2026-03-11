@@ -4,4 +4,4 @@
  * Feature: api-endpoint-testing-transformation
  */
 
-export { ContextRetrieval, type ContextRetrievalConfig } from './ContextRetrieval.js';
+export { RepositoryContextBuilder, type RepositoryContextBuilderConfig } from './RepositoryContextBuilder.js';

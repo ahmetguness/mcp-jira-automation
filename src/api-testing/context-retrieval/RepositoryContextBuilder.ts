@@ -1,5 +1,5 @@
 /**
- * ContextRetrieval class - Retrieves ONLY test-relevant files from repository
+ * RepositoryContextBuilder class - Retrieves ONLY test-relevant files from repository
  * Feature: api-endpoint-testing-transformation
  * Requirements: 11.2
  * 
@@ -31,7 +31,7 @@ import type {
   FileContent,
   EndpointSpec,
 } from '../models/types.js';
-import { TestFramework } from '../models/enums.js';
+import { TestFramework, DatabaseType } from '../models/enums.js';
 import { createLogger } from '../../logger.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -39,9 +39,9 @@ import * as path from 'path';
 const log = createLogger('api-testing:context-retrieval');
 
 /**
- * Configuration for ContextRetrieval
+ * Configuration for RepositoryContextBuilder
  */
-export interface ContextRetrievalConfig {
+export interface RepositoryContextBuilderConfig {
   /** Maximum file size to retrieve (in bytes, default: 1MB) */
   maxFileSizeBytes?: number;
   /** Maximum total context size (in bytes, default: 10MB) */
@@ -51,24 +51,24 @@ export interface ContextRetrievalConfig {
 }
 
 /**
- * ContextRetrieval - Retrieves minimal context needed for test generation
+ * RepositoryContextBuilder - Retrieves minimal context needed for test generation
  * 
  * This class retrieves ONLY test-relevant files from the repository, never
  * source code files. It supports two modes:
  * 1. Full API Mode: Retrieve all API specs, tests, and docs
  * 2. Specific Endpoint Mode: Filter files related to specific endpoints
  */
-export class ContextRetrieval {
-  private config: ContextRetrievalConfig;
+export class RepositoryContextBuilder {
+  private config: RepositoryContextBuilderConfig;
 
-  constructor(config: ContextRetrievalConfig = {}) {
+  constructor(config: RepositoryContextBuilderConfig = {}) {
     this.config = {
       maxFileSizeBytes: 1024 * 1024, // 1MB
       maxTotalContextBytes: 10 * 1024 * 1024, // 10MB
       ...config,
     };
 
-    log.info('ContextRetrieval initialized', {
+    log.info('RepositoryContextBuilder initialized', {
       maxFileSizeBytes: this.config.maxFileSizeBytes,
       maxTotalContextBytes: this.config.maxTotalContextBytes,
     });
@@ -107,6 +107,9 @@ export class ContextRetrieval {
     // Detect test framework from configuration files
     const detectedFramework = this.detectTestFramework(repo, configFiles);
 
+    // Detect database dependencies from configuration files
+    const detectedDatabases = this.detectDatabaseDependencies(configFiles);
+
     // Calculate total context size
     const totalSize = this.calculateTotalSize([
       ...apiSpecs,
@@ -121,6 +124,7 @@ export class ContextRetrieval {
       documentationCount: documentation.length,
       configFilesCount: configFiles.length,
       detectedFramework,
+      detectedDatabases,
       totalSizeBytes: totalSize,
     });
 
@@ -138,6 +142,7 @@ export class ContextRetrieval {
       documentation,
       configurationFiles: configFiles,
       detectedFramework,
+      detectedDatabases,
       repositoryInfo: repo,
     };
   }
@@ -403,6 +408,98 @@ export class ContextRetrieval {
 
     log.debug('No test framework detected');
     return undefined;
+  }
+  /**
+   * Detect database dependencies from configuration files
+   * Requirements: 2.1, 2.2, 3.1
+   *
+   * Analyzes package.json and requirements.txt to detect database dependencies.
+   * This is used to determine if test database configuration should be provided.
+   *
+   * @param configFiles - Configuration files from repository
+   * @returns Array of detected database types
+   */
+  detectDatabaseDependencies(configFiles: FileContent[]): DatabaseType[] {
+    log.debug('Detecting database dependencies from configuration files');
+
+    const detectedDatabases: Set<DatabaseType> = new Set();
+
+    // Node.js database packages mapping
+    const nodeDatabasePackages: Record<string, DatabaseType> = {
+      'mongoose': DatabaseType.MONGODB,
+      'mongodb': DatabaseType.MONGODB,
+      'pg': DatabaseType.POSTGRESQL,
+      'postgres': DatabaseType.POSTGRESQL,
+      'mysql': DatabaseType.MYSQL,
+      'mysql2': DatabaseType.MYSQL,
+      'redis': DatabaseType.REDIS,
+      'ioredis': DatabaseType.REDIS,
+      'sqlite3': DatabaseType.SQLITE,
+      'better-sqlite3': DatabaseType.SQLITE,
+      'sequelize': DatabaseType.POSTGRESQL, // Sequelize supports multiple, default to PostgreSQL
+      'typeorm': DatabaseType.POSTGRESQL, // TypeORM supports multiple, default to PostgreSQL
+      'prisma': DatabaseType.POSTGRESQL, // Prisma supports multiple, default to PostgreSQL
+      'knex': DatabaseType.POSTGRESQL, // Knex supports multiple, default to PostgreSQL
+    };
+
+    // Python database packages mapping
+    const pythonDatabasePackages: Record<string, DatabaseType> = {
+      'pymongo': DatabaseType.MONGODB,
+      'psycopg2': DatabaseType.POSTGRESQL,
+      'psycopg2-binary': DatabaseType.POSTGRESQL,
+      'mysql-connector-python': DatabaseType.MYSQL,
+      'redis': DatabaseType.REDIS,
+      'sqlalchemy': DatabaseType.POSTGRESQL, // SQLAlchemy supports multiple, default to PostgreSQL
+      'django': DatabaseType.POSTGRESQL, // Django supports multiple, default to PostgreSQL
+    };
+
+    // Check package.json for Node.js dependencies
+    const packageJson = configFiles.find(f => f.path.endsWith('package.json'));
+    if (packageJson) {
+      try {
+        const pkg = JSON.parse(packageJson.content);
+        const allDeps = {
+          ...pkg.dependencies,
+          ...pkg.devDependencies,
+        };
+
+        // Check each dependency against known database packages
+        for (const [packageName, dbType] of Object.entries(nodeDatabasePackages)) {
+          if (allDeps[packageName]) {
+            detectedDatabases.add(dbType);
+            log.debug(`Detected ${dbType} dependency: ${packageName}`);
+          }
+        }
+      } catch (error) {
+        log.warn('Failed to parse package.json', { error });
+      }
+    }
+
+    // Check requirements.txt for Python dependencies
+    const requirementsTxt = configFiles.find(f => f.path.endsWith('requirements.txt'));
+    if (requirementsTxt) {
+      const content = requirementsTxt.content;
+
+      // Check each line for known database packages
+      for (const [packageName, dbType] of Object.entries(pythonDatabasePackages)) {
+        // Match package name at start of line or after whitespace, followed by version specifier or newline
+        const regex = new RegExp(`(^|\\s)${packageName}([=<>!]|$)`, 'm');
+        if (regex.test(content)) {
+          detectedDatabases.add(dbType);
+          log.debug(`Detected ${dbType} dependency: ${packageName}`);
+        }
+      }
+    }
+
+    const result = Array.from(detectedDatabases);
+
+    if (result.length > 0) {
+      log.info('Database dependencies detected', { databases: result });
+    } else {
+      log.debug('No database dependencies detected');
+    }
+
+    return result;
   }
 
   /**

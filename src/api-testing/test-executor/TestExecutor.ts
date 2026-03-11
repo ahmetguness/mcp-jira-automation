@@ -16,8 +16,9 @@ import type {
   PerformanceMetrics,
   ExecutionResult,
   TestFramework,
+  TestContext,
 } from '../models/types.js';
-import { TestStatus as TestStatusEnum } from '../models/enums.js';
+import { TestStatus as TestStatusEnum, DatabaseType } from '../models/enums.js';
 import { CredentialManager } from '../credential-manager/index.js';
 
 /**
@@ -60,14 +61,15 @@ export class TestExecutor {
    */
   async executeTests(
     tests: GeneratedTests,
-    config: ExecutionConfig
+    config: ExecutionConfig,
+    context?: TestContext
   ): Promise<TestResults> {
     const startTime = Date.now();
     let container: Docker.Container | null = null;
 
     try {
       // Requirement 3.1: Create fresh Docker container
-      container = await this.createContainer(tests.framework, config);
+      container = await this.createContainer(tests.framework, config, context);
 
       // Requirement 3.3: Execute tests inside container
       const result = await this.runTestsInContainer(container, tests, config);
@@ -85,7 +87,7 @@ export class TestExecutor {
     } catch (error) {
       // Requirement 3.7, 10.1, 10.2: Retry logic for network errors
       if (this.isRetryableError(error as Error)) {
-        return await this.executeWithRetry(tests, config);
+        return await this.executeWithRetry(tests, config, context);
       }
 
       // Non-retryable error - return failure results
@@ -107,7 +109,8 @@ export class TestExecutor {
    */
   async createContainer(
     framework: TestFramework,
-    config: ExecutionConfig
+    config: ExecutionConfig,
+    context?: TestContext
   ): Promise<Docker.Container> {
     // Requirement 6.6: Select framework-appropriate image
     const image = FRAMEWORK_IMAGES[framework];
@@ -121,7 +124,7 @@ export class TestExecutor {
     const containerName = `api-test-${Date.now()}`;
 
     // Requirement 7.5: Pass credentials as environment variables only
-    const envVars = this.buildEnvironmentVariables(config);
+    const envVars = this.buildEnvironmentVariables(config, context);
 
     // Create container with security constraints
     const container = await this.docker.createContainer({
@@ -153,48 +156,56 @@ export class TestExecutor {
    * Requirements: 3.4, 3.6
    */
   private async runTestsInContainer(
-    container: Docker.Container,
-    tests: GeneratedTests,
-    config: ExecutionConfig
-  ): Promise<ExecutionResult> {
-    const timeout = config.timeoutSeconds || this.DEFAULT_TIMEOUT_SECONDS;
-    const timeoutMs = timeout * 1000;
+      container: Docker.Container,
+      tests: GeneratedTests,
+      config: ExecutionConfig
+    ): Promise<ExecutionResult> {
+      const timeout = config.timeoutSeconds || this.DEFAULT_TIMEOUT_SECONDS;
+      const timeoutMs = timeout * 1000;
+      // Use longer timeout for dependency installation (3x test timeout, min 5 minutes)
+      const installTimeoutMs = Math.max(timeoutMs * 3, 300_000);
 
-    try {
-      // Write test files to container
-      await this.writeTestFiles(container, tests);
+      try {
+        // Write test files to container
+        await this.writeTestFiles(container, tests);
 
-      // Install dependencies
-      if (tests.setupCommands.length > 0) {
-        for (const cmd of tests.setupCommands) {
-          await this.execInContainer(container, ['sh', '-c', cmd], timeoutMs);
+        // Install dependencies with extended timeout
+        if (tests.setupCommands.length > 0) {
+          for (const cmd of tests.setupCommands) {
+            await this.execInContainer(container, ['sh', '-c', cmd], installTimeoutMs);
+          }
         }
-      }
 
-      // Run tests with timeout
-      const startTime = Date.now();
-      const result = await this.execInContainerWithTimeout(
-        container,
-        ['sh', '-c', tests.runCommand],
-        timeoutMs
-      );
-      const durationMs = Date.now() - startTime;
+        // Start server if needed (for API tests that require a running server)
+        if (this.needsServerStartup(tests, config)) {
+          await this.startServerInContainer(container, config);
+        }
 
-      return {
-        ...result,
-        durationMs,
-      };
-    } catch (error) {
-      if ((error as Error).message.includes('timeout')) {
-        // Requirement 3.4: Timeout enforcement with SIGTERM/SIGKILL
-        await this.terminateContainer(container);
-        const timeoutError = new Error(`Test execution timed out after ${timeout} seconds`) as Error & { cause?: unknown };
-        timeoutError.cause = error;
-        throw timeoutError;
+        // Run tests with timeout
+        const startTime = Date.now();
+        const result = await this.execInContainerWithTimeout(
+          container,
+          ['sh', '-c', tests.runCommand],
+          timeoutMs
+        );
+        const durationMs = Date.now() - startTime;
+
+        return {
+          ...result,
+          durationMs,
+        };
+      } catch (error) {
+        if ((error as Error).message.includes('timeout')) {
+          // Requirement 3.4: Timeout enforcement with SIGTERM/SIGKILL
+          await this.terminateContainer(container);
+          const timeoutError = new Error(`Test execution timed out after ${timeout} seconds`) as Error & { cause?: unknown };
+          timeoutError.cause = error;
+          throw timeoutError;
+        }
+        throw error;
       }
-      throw error;
     }
-  }
+
 
   /**
    * Execute command in container with timeout
@@ -319,7 +330,8 @@ export class TestExecutor {
    */
   private async executeWithRetry(
     tests: GeneratedTests,
-    config: ExecutionConfig
+    config: ExecutionConfig,
+    context?: TestContext
   ): Promise<TestResults> {
     const maxRetries = config.retryCount || 3;
     const backoffSeconds = config.retryBackoffSeconds || [1, 2, 4];
@@ -334,7 +346,7 @@ export class TestExecutor {
           await this.sleep(backoff * 1000);
         }
 
-        return await this.executeTests(tests, config);
+        return await this.executeTests(tests, config, context);
       } catch (error) {
         lastError = error as Error;
 
@@ -391,7 +403,10 @@ export class TestExecutor {
    * Build environment variables for container
    * Requirement 7.5: Pass credentials as environment variables only
    */
-  private buildEnvironmentVariables(config: ExecutionConfig): string[] {
+  private buildEnvironmentVariables(
+      config: ExecutionConfig,
+      context?: TestContext
+    ): string[] {
       const envVars: string[] = [
         'DEBIAN_FRONTEND=noninteractive',
         'HOME=/root',
@@ -406,8 +421,77 @@ export class TestExecutor {
         envVars.push(`${key}=${value}`);
       }
 
+      // Add database configuration if databases are detected and not already provided by user
+      // Requirements 2.3, 2.4, 2.5, 2.6, 3.2
+      if (context?.detectedDatabases && context.detectedDatabases.length > 0) {
+        const databaseEnvVars = this.generateDatabaseEnvironmentVariables(
+          context.detectedDatabases,
+          config.credentials
+        );
+        envVars.push(...databaseEnvVars);
+      }
+
       return envVars;
     }
+
+  /**
+   * Generate database environment variables for detected databases
+   * Requirements 2.3, 2.4, 2.5, 2.6, 3.2
+   */
+  private generateDatabaseEnvironmentVariables(
+    detectedDatabases: DatabaseType[],
+    userCredentials: Record<string, string>
+  ): string[] {
+    const envVars: string[] = [];
+
+    for (const dbType of detectedDatabases) {
+      const dbConfig = this.getDatabaseConfig(dbType);
+      
+      // Only add database variable if not already provided by user (user config takes precedence)
+      // Requirement 3.2: User-provided credentials must take precedence
+      if (!userCredentials[dbConfig.envVarName]) {
+        envVars.push(`${dbConfig.envVarName}=${dbConfig.testUrl}`);
+      }
+    }
+
+    return envVars;
+  }
+
+  /**
+   * Get database configuration for a specific database type
+   * Maps database types to environment variable names and test URLs
+   */
+  private getDatabaseConfig(dbType: DatabaseType): { envVarName: string; testUrl: string } {
+    switch (dbType) {
+      case DatabaseType.MONGODB:
+        return {
+          envVarName: 'MONGODB_URL',
+          testUrl: 'mongodb://localhost:27017/test',
+        };
+      case DatabaseType.POSTGRESQL:
+        return {
+          envVarName: 'DATABASE_URL',
+          testUrl: 'postgresql://localhost:5432/test',
+        };
+      case DatabaseType.MYSQL:
+        return {
+          envVarName: 'MYSQL_URL',
+          testUrl: 'mysql://localhost:3306/test',
+        };
+      case DatabaseType.REDIS:
+        return {
+          envVarName: 'REDIS_URL',
+          testUrl: 'redis://localhost:6379',
+        };
+      case DatabaseType.SQLITE:
+        return {
+          envVarName: 'SQLITE_DATABASE',
+          testUrl: ':memory:',
+        };
+      default:
+        throw new Error(`Unsupported database type: ${dbType}`);
+    }
+  }
 
 
   /**
@@ -659,4 +743,128 @@ export class TestExecutor {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+
+  /**
+   * Detect if server startup is needed for API tests
+   * Server startup is needed when:
+   * - Framework is Node.js-based (jest+supertest)
+   * - Test files contain API endpoint tests
+   */
+  private needsServerStartup(tests: GeneratedTests, config: ExecutionConfig): boolean {
+    // Only Node.js frameworks need container-based server startup
+    const isNodeFramework = tests.framework === 'jest+supertest';
+    if (!isNodeFramework) {
+      return false;
+    }
+
+    // Check if test files contain API testing patterns
+    const hasApiTests = tests.testFiles.some(file => 
+      file.content.includes('http://') || 
+      file.content.includes('localhost') ||
+      file.content.includes('127.0.0.1') ||
+      file.content.includes('API_BASE_URL')
+    );
+
+    return hasApiTests;
+  }
+
+  /**
+   * Start application server in container before running tests
+   * Tries multiple common server startup patterns and waits for server readiness
+   */
+  private async startServerInContainer(
+    container: Docker.Container,
+    config: ExecutionConfig
+  ): Promise<void> {
+    const port = 3001; // Default port for API tests
+    const serverStartupPatterns = [
+      `node -e "require('./src/app').listen(${port})" > /tmp/server.log 2>&1 &`,
+      `node -e "require('./app').listen(${port})" > /tmp/server.log 2>&1 &`,
+      `node -e "require('./src/index').listen(${port})" > /tmp/server.log 2>&1 &`,
+      `node -e "require('./index').listen(${port})" > /tmp/server.log 2>&1 &`,
+      `node src/app.js > /tmp/server.log 2>&1 &`,
+      `node app.js > /tmp/server.log 2>&1 &`,
+      `node src/index.js > /tmp/server.log 2>&1 &`,
+      `node index.js > /tmp/server.log 2>&1 &`,
+    ];
+
+    let serverStarted = false;
+    let lastError = '';
+
+    // Try each startup pattern
+    for (const cmd of serverStartupPatterns) {
+      try {
+        // Execute server startup command in background
+        await this.execInContainer(container, ['sh', '-c', cmd], 5000);
+        
+        // Wait for server to become ready
+        const isReady = await this.waitForServerReady(container, port, 10000);
+        
+        if (isReady) {
+          serverStarted = true;
+          break;
+        }
+      } catch (error) {
+        lastError = (error as Error).message;
+        // Continue to next pattern
+      }
+    }
+
+    if (!serverStarted) {
+      // Get server logs for debugging
+      try {
+        const logsResult = await this.execInContainer(
+          container,
+          ['sh', '-c', 'cat /tmp/server.log 2>/dev/null || echo "No server logs available"'],
+          5000
+        );
+        throw new Error(
+          `Failed to start server. Last error: ${lastError}\nServer logs:\n${logsResult.output}`
+        );
+      } catch (error) {
+        throw new Error(`Failed to start server: ${lastError}`);
+      }
+    }
+  }
+
+  /**
+   * Wait for server to become ready by polling the port
+   * Uses exponential backoff for retries
+   */
+  private async waitForServerReady(
+    container: Docker.Container,
+    port: number,
+    timeoutMs: number
+  ): Promise<boolean> {
+    const startTime = Date.now();
+    const delays = [100, 200, 400, 800, 1600]; // Exponential backoff
+    let attemptIndex = 0;
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        // Try to connect to the server using curl
+        const result = await this.execInContainer(
+          container,
+          ['sh', '-c', `curl -s -o /dev/null -w "%{http_code}" http://localhost:${port} 2>/dev/null || echo "000"`],
+          5000
+        );
+
+        // Check if we got any HTTP response (even 404 means server is running)
+        const httpCode = result.output.trim();
+        if (httpCode !== '000' && httpCode !== '') {
+          return true;
+        }
+      } catch {
+        // Connection failed, continue waiting
+      }
+
+      // Wait before next attempt with exponential backoff
+      const delay = delays[Math.min(attemptIndex, delays.length - 1)] ?? 1600;
+      await this.sleep(delay);
+      attemptIndex++;
+    }
+
+    return false;
+  }
 }
+

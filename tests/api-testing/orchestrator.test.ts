@@ -52,6 +52,10 @@ describe('ApiTestOrchestrator', () => {
         defaultRepositoryUrl: 'https://github.com/test/repo',
         defaultBranch: 'main',
       },
+      appConfig: {
+        aiProvider: 'anthropic',
+        anthropicApiKey: 'dummy',
+      } as any,
     });
   });
 
@@ -72,9 +76,13 @@ describe('ApiTestOrchestrator', () => {
           jiraApiToken: 'test-token',
           botUserIdentifier: 'Test Bot',
         },
+        appConfig: {
+          aiProvider: 'anthropic',
+          anthropicApiKey: 'dummy',
+        } as any,
       };
       
-      const orch = new ApiTestOrchestrator(config);
+      const orch = new ApiTestOrchestrator(config as any);
       expect(orch).toBeDefined();
     });
   });
@@ -175,7 +183,7 @@ describe('ApiTestOrchestrator', () => {
       
       // Should complete all stages (even with placeholder implementations)
       expect(result.taskKey).toBe('TEST-3');
-      expect(result.endpoints).toBeDefined();
+      console.log(JSON.stringify(result)); expect(result.endpoints).toBeDefined();
       expect(result.endpoints?.length).toBeGreaterThan(0);
     });
   });

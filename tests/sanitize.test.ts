@@ -46,8 +46,8 @@ describe("validateRepoUrl", () => {
     });
 
     it("should accept owner/repo format", () => {
-        expect(validateRepoUrl("org/repo")).toBe("org/repo");
-        expect(validateRepoUrl("my-user/my-repo")).toBe("my-user/my-repo");
+        expect(validateRepoUrl("org/repo")).toBe("https://github.com/org/repo");
+        expect(validateRepoUrl("my-user/my-repo")).toBe("https://github.com/my-user/my-repo");
     });
 
     it("should reject non-HTTPS protocols", () => {
