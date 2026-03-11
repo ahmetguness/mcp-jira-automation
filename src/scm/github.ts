@@ -4,7 +4,7 @@
 
 import type { ScmProvider } from "./provider.js";
 import type { ScmFile, RepoInfo } from "../types.js";
-import { parseGitHubFile, parseGitHubFileList, parseGitHubPullRequest } from "../validation/scm.js";
+import { parseGitHubFile, parseGitHubFileList, parseGitHubPullRequest, parseGitHubBranchList } from "../validation/scm.js";
 import type { McpManager } from "../mcp/manager.js";
 import { createLogger } from "../logger.js";
 
@@ -17,28 +17,22 @@ export class GitHubProvider implements ScmProvider {
         const [owner, name] = this.parseRepo(repo);
         
         try {
-            // Try common branch names to detect default branch
-            // Try master first (more common for older repos), then main
+            const rawResult = await this.mcp.callScmTool("list_branches", {
+                owner,
+                repo: name,
+            });
+            
+            const branches = parseGitHubBranchList(rawResult);
+            const branchNames = new Set(branches.map(b => b.name).filter(Boolean));
+
             const commonBranches = ["master", "main", "develop"];
             for (const branch of commonBranches) {
-                try {
-                    const rawResult = await this.mcp.callScmTool("get_file_contents", {
-                        owner,
-                        repo: name,
-                        path: "",
-                        branch,
-                    });
-                    
-                    // Validate that the result is an array of files instead of an error object
-                    parseGitHubFileList(rawResult);
-                    
+                if (branchNames.has(branch)) {
                     log.info(`Detected default branch: ${branch}`);
                     return {
                         name: repo,
                         defaultBranch: branch,
                     };
-                } catch {
-                    // Try next branch
                 }
             }
         } catch (e) {
@@ -139,15 +133,6 @@ export class GitHubProvider implements ScmProvider {
     async createBranch(repo: string, branchName: string, baseBranch?: string): Promise<void> {
         const [owner, name] = this.parseRepo(repo);
         const base = baseBranch ?? "master";
-
-        // (Optional warm-up) some servers require a read to ensure repo/branch exists
-        const rawResult = await this.mcp.callScmTool("get_file_contents", {
-            owner,
-            repo: name,
-            path: "",
-            branch: base,
-        });
-        parseGitHubFileList(rawResult);
 
         await this.mcp.callScmTool("create_branch", {
             owner,

@@ -17,11 +17,17 @@ export const ZodGitHubFile = z.object({
     encoding: z.string().optional(),
     path: z.string().optional(),
     name: z.string().optional(),
+    type: z.string().optional(),
 }).catchall(z.unknown());
 
 export const ZodGitHubPullRequest = z.object({
     html_url: z.string().optional(),
     url: z.string().optional(),
+}).catchall(z.unknown());
+
+export const ZodGitHubBranch = z.object({
+    name: z.string().optional(),
+    protected: z.boolean().optional(),
 }).catchall(z.unknown());
 
 // ─── GitLab ──────────────────────────────────────────────────
@@ -93,6 +99,12 @@ export function parseGitHubFileList(input: unknown) {
 export function parseGitHubPullRequest(input: unknown) {
     const res = ZodGitHubPullRequest.safeParse(input);
     if (!res.success) throw new Error(`Invalid GitHub PR: ${res.error.message}`);
+    return res.data;
+}
+
+export function parseGitHubBranchList(input: unknown) {
+    const res = z.array(ZodGitHubBranch).safeParse(input);
+    if (!res.success) throw new Error(`Invalid GitHub Branch List: ${res.error.message}`);
     return res.data;
 }
 
