@@ -22,12 +22,16 @@ export class GitHubProvider implements ScmProvider {
             const commonBranches = ["master", "main", "develop"];
             for (const branch of commonBranches) {
                 try {
-                    await this.mcp.callScmTool("get_file_contents", {
+                    const rawResult = await this.mcp.callScmTool("get_file_contents", {
                         owner,
                         repo: name,
                         path: "",
                         branch,
                     });
+                    
+                    // Validate that the result is an array of files instead of an error object
+                    parseGitHubFileList(rawResult);
+                    
                     log.info(`Detected default branch: ${branch}`);
                     return {
                         name: repo,
@@ -70,13 +74,50 @@ export class GitHubProvider implements ScmProvider {
     }
 
     async listFiles(repo: string, path?: string, _branch?: string): Promise<string[]> {
-        const [owner, name] = this.parseRepo(repo);
-        const args: Record<string, unknown> = { owner, repo: name, path: path ?? "" };
+        return this.listFilesRecursive(repo, path ?? "", 0);
+    }
 
-        const rawResult = await this.mcp.callScmTool("get_file_contents", args);
+    /**
+     * Recursively list files in a GitHub repository.
+     * GitHub's get_file_contents only returns immediate children of a directory.
+     * For monorepos, we need to recurse into subdirectories to find source files.
+     */
+    private async listFilesRecursive(repo: string, path: string, depth: number): Promise<string[]> {
+        const MAX_DEPTH = 4;
+        if (depth > MAX_DEPTH) return [];
+
+        const [owner, name] = this.parseRepo(repo);
+        const args: Record<string, unknown> = { owner, repo: name, path };
+
         try {
+            const rawResult = await this.mcp.callScmTool("get_file_contents", args);
             const result = parseGitHubFileList(rawResult);
-            return result.map((f) => f.path ?? f.name ?? (typeof f === "string" ? f : ""));
+
+            const files: string[] = [];
+            const subdirs: string[] = [];
+
+            for (const entry of result) {
+                const entryPath = entry.path ?? entry.name ?? "";
+                if (!entryPath) continue;
+
+                if (entry.type === "dir") {
+                    subdirs.push(entryPath);
+                } else {
+                    files.push(entryPath);
+                }
+            }
+
+            // Recurse into subdirectories (skip common non-source dirs)
+            const skipDirs = new Set(["node_modules", ".git", "dist", "build", "coverage", ".next", "__pycache__", "vendor", ".venv", "venv"]);
+            for (const dir of subdirs) {
+                const dirName = dir.split("/").pop() ?? "";
+                if (skipDirs.has(dirName)) continue;
+
+                const subFiles = await this.listFilesRecursive(repo, dir, depth + 1);
+                files.push(...subFiles);
+            }
+
+            return files;
         } catch {
             return [];
         }
@@ -100,12 +141,13 @@ export class GitHubProvider implements ScmProvider {
         const base = baseBranch ?? "master";
 
         // (Optional warm-up) some servers require a read to ensure repo/branch exists
-        await this.mcp.callScmTool("get_file_contents", {
+        const rawResult = await this.mcp.callScmTool("get_file_contents", {
             owner,
             repo: name,
             path: "",
             branch: base,
         });
+        parseGitHubFileList(rawResult);
 
         await this.mcp.callScmTool("create_branch", {
             owner,
