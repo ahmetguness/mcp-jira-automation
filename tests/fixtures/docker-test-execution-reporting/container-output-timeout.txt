@@ -1,0 +1,7 @@
+RUNS tests/sample.test.js
+  Sample Test Suite
+    ○ should pass basic assertion
+    ○ should handle long running operation
+
+Test execution exceeded timeout limit (300000ms)
+Container terminated forcefully

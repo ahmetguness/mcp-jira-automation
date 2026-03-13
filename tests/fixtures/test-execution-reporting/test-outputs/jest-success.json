@@ -1,0 +1,54 @@
+{
+  "numFailedTestSuites": 0,
+  "numFailedTests": 0,
+  "numPassedTestSuites": 1,
+  "numPassedTests": 3,
+  "numPendingTestSuites": 0,
+  "numPendingTests": 0,
+  "numRuntimeErrorTestSuites": 0,
+  "numTodoTests": 0,
+  "numTotalTestSuites": 1,
+  "numTotalTests": 3,
+  "startTime": 1705334400000,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["Calculator"],
+          "duration": 5,
+          "failureMessages": [],
+          "fullName": "Calculator should add two numbers",
+          "location": null,
+          "status": "passed",
+          "title": "should add two numbers"
+        },
+        {
+          "ancestorTitles": ["Calculator"],
+          "duration": 3,
+          "failureMessages": [],
+          "fullName": "Calculator should subtract two numbers",
+          "location": null,
+          "status": "passed",
+          "title": "should subtract two numbers"
+        },
+        {
+          "ancestorTitles": ["Calculator"],
+          "duration": 2,
+          "failureMessages": [],
+          "fullName": "Calculator should multiply two numbers",
+          "location": null,
+          "status": "passed",
+          "title": "should multiply two numbers"
+        }
+      ],
+      "endTime": 1705334401000,
+      "message": "",
+      "name": "/path/to/calculator.test.ts",
+      "startTime": 1705334400000,
+      "status": "passed",
+      "summary": ""
+    }
+  ],
+  "wasInterrupted": false
+}

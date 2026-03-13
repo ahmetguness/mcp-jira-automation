@@ -1,0 +1,12 @@
+{
+  "defaultImage": "node:20-alpine",
+  "networkMode": "none",
+  "resourceLimits": {
+    "memory": "1g",
+    "cpu": "1.0"
+  },
+  "timeout": 300000,
+  "cleanupRetries": 3,
+  "cleanupRetryDelay": 1000,
+  "pullTimeout": 120000
+}

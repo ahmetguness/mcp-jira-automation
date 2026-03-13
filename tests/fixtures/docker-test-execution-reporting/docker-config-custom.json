@@ -1,0 +1,13 @@
+{
+  "defaultImage": "node:18-alpine",
+  "imageRegistry": "custom.registry.io",
+  "networkMode": "bridge",
+  "resourceLimits": {
+    "memory": "2g",
+    "cpu": "2.0"
+  },
+  "timeout": 600000,
+  "cleanupRetries": 5,
+  "cleanupRetryDelay": 2000,
+  "pullTimeout": 180000
+}

@@ -1,0 +1,28 @@
+FAIL tests/sample.test.js
+  Sample Test Suite
+    ✓ should pass basic assertion (2 ms)
+    ✕ should handle async operations (12 ms)
+    ✓ should validate object properties (1 ms)
+
+  ● Sample Test Suite › should handle async operations
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "success"
+    Received: "failure"
+
+      8 |   test('should handle async operations', async () => {
+      9 |     const result = await Promise.resolve('failure');
+    > 10 |     expect(result).toBe('success');
+         |                    ^
+      11 |   });
+      12 |
+      13 |   test('should validate object properties', () => {
+
+      at Object.<anonymous> (tests/sample.test.js:10:20)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 2 passed, 3 total
+Snapshots:   0 total
+Time:        0.612 s
+Ran all test suites.

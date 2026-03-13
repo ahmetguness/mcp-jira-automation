@@ -1,0 +1,10 @@
+Test Automation Task
+
+This task involves creating automated tests for user login functionality.
+
+Acceptance Criteria:
+- Successful login test should be written
+- Invalid password test should be written
+- Empty field test should be written
+
+All scenarios should pass when tests are executed.

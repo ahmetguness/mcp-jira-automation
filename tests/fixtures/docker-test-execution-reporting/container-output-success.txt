@@ -1,0 +1,11 @@
+PASS tests/sample.test.js
+  Sample Test Suite
+    ✓ should pass basic assertion (2 ms)
+    ✓ should handle async operations (5 ms)
+    ✓ should validate object properties (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       3 passed, 3 total
+Snapshots:   0 total
+Time:        0.523 s
+Ran all test suites.

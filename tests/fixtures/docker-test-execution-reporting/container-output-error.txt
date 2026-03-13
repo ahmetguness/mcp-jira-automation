@@ -1,0 +1,14 @@
+Error: Cannot find module 'missing-dependency'
+Require stack:
+- /workspace/tests/sample.test.js
+- /workspace/node_modules/jest-runtime/build/index.js
+    at Function.Module._resolveFilename (node:internal/modules/cjs/loader:1048:15)
+    at Function.Module._load (node:internal/modules/cjs/loader:901:27)
+    at Module.require (node:internal/modules/cjs/loader:1115:19)
+    at require (node:internal/modules/helpers:130:18)
+    at Object.<anonymous> (/workspace/tests/sample.test.js:2:1)
+
+Test Suites: 1 failed, 1 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        0.123 s

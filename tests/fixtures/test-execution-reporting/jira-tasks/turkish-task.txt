@@ -1,0 +1,10 @@
+Test Otomasyonu Görevi
+
+Bu görev, kullanıcı girişi için otomatik testler oluşturmayı içerir.
+
+Kabul Kriterleri:
+- Başarılı giriş testi yazılmalı
+- Hatalı şifre testi yazılmalı
+- Boş alan testi yazılmalı
+
+Testler çalıştırıldığında tüm senaryolar başarılı olmalıdır.

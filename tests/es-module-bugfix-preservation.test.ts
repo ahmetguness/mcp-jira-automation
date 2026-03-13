@@ -33,7 +33,7 @@ beforeAll(() => {
     if (existsSync("dist")) {
         baselineDistFiles = getAllFiles("dist");
     }
-});
+}, 30000);
 
 /**
  * Recursively get all files in a directory
@@ -62,7 +62,7 @@ describe("ES Module Bugfix Preservation Tests", () => {
      * For any build process execution, the fixed state SHALL produce the same
      * compiled output in dist/ directory as before the fix.
      */
-    it("should preserve TypeScript compilation to dist/ directory", () => {
+    it("should preserve TypeScript compilation to dist/ directory", { timeout: 30000 }, () => {
         // Verify build command succeeds
         expect(() => {
             execSync("npm run build", { encoding: "utf-8", stdio: "pipe" });

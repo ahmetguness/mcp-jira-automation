@@ -1,0 +1,56 @@
+{
+  "numFailedTestSuites": 1,
+  "numFailedTests": 1,
+  "numPassedTestSuites": 0,
+  "numPassedTests": 2,
+  "numPendingTestSuites": 0,
+  "numPendingTests": 0,
+  "numRuntimeErrorTestSuites": 0,
+  "numTodoTests": 0,
+  "numTotalTestSuites": 1,
+  "numTotalTests": 3,
+  "startTime": 1705334400000,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["Calculator"],
+          "duration": 5,
+          "failureMessages": [],
+          "fullName": "Calculator should add two numbers",
+          "location": null,
+          "status": "passed",
+          "title": "should add two numbers"
+        },
+        {
+          "ancestorTitles": ["Calculator"],
+          "duration": 8,
+          "failureMessages": [
+            "Error: expect(received).toBe(expected)\n\nExpected: 5\nReceived: 3\n    at Object.<anonymous> (/path/to/calculator.test.ts:15:23)"
+          ],
+          "fullName": "Calculator should subtract two numbers",
+          "location": null,
+          "status": "failed",
+          "title": "should subtract two numbers"
+        },
+        {
+          "ancestorTitles": ["Calculator"],
+          "duration": 2,
+          "failureMessages": [],
+          "fullName": "Calculator should multiply two numbers",
+          "location": null,
+          "status": "passed",
+          "title": "should multiply two numbers"
+        }
+      ],
+      "endTime": 1705334401000,
+      "message": "",
+      "name": "/path/to/calculator.test.ts",
+      "startTime": 1705334400000,
+      "status": "failed",
+      "summary": ""
+    }
+  ],
+  "wasInterrupted": false
+}

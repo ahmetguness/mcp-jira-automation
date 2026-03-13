@@ -1,0 +1,12 @@
+{
+  "defaultImage": "node:20",
+  "networkMode": "host",
+  "resourceLimits": {
+    "memory": "512m",
+    "cpu": "0.5"
+  },
+  "timeout": 300000,
+  "cleanupRetries": 3,
+  "cleanupRetryDelay": 1000,
+  "pullTimeout": 120000
+}
