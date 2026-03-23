@@ -166,14 +166,23 @@ export function buildUserPrompt(context: TaskContext): string {
     prompt += `multi_language_repo: ${rs.isMulti}\n\n`;
   }
 
-  // Add module system information only for ES module repositories
+  // Add module system information - ALWAYS include this for clarity
   const moduleSystem = detectModuleSystem(context);
+  prompt += `## Module System (CRITICAL - READ THIS FIRST)\n`;
+  prompt += `module_system: ${moduleSystem}\n`;
   if (moduleSystem === "esm") {
-    prompt += `## Module System\n`;
-    prompt += `module_system: esm\n`;
-    prompt += `**CRITICAL:** Generate test files using ES module syntax (import/export statements).\n`;
-    prompt += `\n`;
+    prompt += `**CRITICAL:** This repository uses ES MODULES. You MUST generate test files using ES module syntax:\n`;
+    prompt += `- Use \`import\` statements (NOT \`require()\`)\n`;
+    prompt += `- Use \`export\` statements (NOT \`module.exports\`)\n`;
+    prompt += `- Include .js extensions in import paths (e.g., \`import app from './src/app.js'\`)\n`;
+    prompt += `- Use \`await import()\` for dynamic imports\n`;
+    prompt += `**FAILURE TO USE ES MODULE SYNTAX WILL CAUSE: "ReferenceError: require is not defined"**\n`;
+  } else {
+    prompt += `**INFO:** This repository uses CommonJS. Generate test files using CommonJS syntax:\n`;
+    prompt += `- Use \`require()\` statements\n`;
+    prompt += `- Use \`module.exports\`\n`;
   }
+  prompt += `\n`;
 
   prompt += `## Repository: ${context.repo.name}\n`;
   prompt += `**Default Branch:** ${context.repo.defaultBranch}\n\n`;

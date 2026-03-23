@@ -80,9 +80,9 @@ describe("ES Module Bugfix Preservation Tests", () => {
         expect(dtsFiles.length).toBeGreaterThan(0);
 
         // Verify key output files exist
-        expect(existsSync("dist/index.js")).toBe(true);
-        expect(existsSync("dist/config.js")).toBe(true);
-        expect(existsSync("dist/logger.js")).toBe(true);
+        expect(existsSync("dist/src/index.js")).toBe(true);
+        expect(existsSync("dist/src/config.js")).toBe(true);
+        expect(existsSync("dist/src/logger.js")).toBe(true);
     });
 
     /**
@@ -210,10 +210,10 @@ describe("ES Module Bugfix Preservation Tests", () => {
         expect(mapFiles.length).toBeGreaterThan(0);
 
         // Verify key directories exist in dist/
-        expect(existsSync("dist/ai")).toBe(true);
-        expect(existsSync("dist/jira")).toBe(true);
-        expect(existsSync("dist/mcp")).toBe(true);
-        expect(existsSync("dist/validation")).toBe(true);
+        expect(existsSync("dist/src/ai")).toBe(true);
+        expect(existsSync("dist/src/jira")).toBe(true);
+        expect(existsSync("dist/src/mcp")).toBe(true);
+        expect(existsSync("dist/src/validation")).toBe(true);
 
         // Store baseline for comparison after fix
         if (baselineDistFiles.length === 0) {

@@ -123,11 +123,14 @@ module.exports = server;`,
 
         const prompt = buildUserPrompt(noPackageJsonContext);
 
-        // On unfixed code, there should be no module system indicator
+        // After the fix, module system is always included for clarity
         const hasModuleSystemField = prompt.includes("module_system:");
         
-        // Without package.json, the system should not add module system info
-        expect(hasModuleSystemField).toBe(false);
+        // The system should now always add module system info, defaulting to commonjs
+        expect(hasModuleSystemField).toBe(true);
+        
+        // Verify it defaults to commonjs
+        expect(prompt).toContain("module_system: commonjs");
         
         // Verify the prompt contains the source file
         expect(prompt).toContain("src/server.js");
@@ -320,7 +323,7 @@ module.exports = app;`,
      * Property-Based Test: Repository Structures Without Package.json
      * 
      * Generate random repository structures without package.json
-     * and verify they don't get ES module indicators.
+     * and verify they default to CommonJS module system.
      */
     it("should handle repositories without package.json consistently", () => {
         // Arbitrary generator for source files without package.json
@@ -360,11 +363,12 @@ module.exports = express();`),
 
                 const prompt = buildUserPrompt(context);
                 
-                // Without package.json, there should be no module system field
+                // After the fix, module system is always included, defaulting to commonjs
                 const hasModuleSystemField = prompt.includes("module_system:");
+                const isCommonJS = prompt.includes("module_system: commonjs");
                 
-                // This should be false for all repos without package.json
-                return !hasModuleSystemField;
+                // This should be true for all repos without package.json (defaults to commonjs)
+                return hasModuleSystemField && isCommonJS;
             }),
             {
                 numRuns: 30,

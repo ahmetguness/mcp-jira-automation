@@ -79,12 +79,13 @@ export class PipelineHandler {
         log.info(`📋 Processing ${issue.key}: "${issue.summary}" (attempt ${attempt}/${maxAttempts})`, { issueKey: issue.key, step: "start" });
 
         try {
-            // Step 1: Get repository
+            // ── Step 1: Repository ──────────────────────────────────
             const repo = await this.jira.getRepositoryField(issue.key);
             if (!repo) {
                 throw new Error("No repository found on issue. Set the Repository custom field.");
             }
             issue.repository = repo;
+            log.info(`📦 Repository: ${repo}`, { issueKey: issue.key, step: "repo" });
 
             // If approval required, write plan to Jira and wait
             if (this.config.requireApproval) {
@@ -94,24 +95,24 @@ export class PipelineHandler {
                 );
             }
 
-            // Step 2: Build context
-            log.info(`📦 Fetching code from ${repo}...`, { issueKey: issue.key, step: "context" });
+            // ── Step 2: Context ──────────────────────────────────
+            log.info(`🔍 Fetching source code...`, { issueKey: issue.key, step: "context" });
             const { result: context, duration_ms: contextMs } = await withTiming(() =>
                 buildTaskContext(issue, this.scm, repo),
             );
-            log.timed("info", `✅ Context ready: ${context.sourceFiles.length} source files, ${context.testFiles.length} test files`, contextMs, {
+            log.timed("info", `✅ Context: ${context.sourceFiles.length} source + ${context.testFiles.length} test files (${(contextMs / 1000).toFixed(1)}s)`, contextMs, {
                 issueKey: issue.key,
                 step: "context",
                 source: context.sourceFiles.length,
                 tests: context.testFiles.length,
             });
 
-            // Step 3: AI analysis
+            // ── Step 3: AI Analysis ─────────────────────────────────
             log.info(`🤖 AI analyzing code...`, { issueKey: issue.key, step: "ai" });
             const { result: analysis, duration_ms: aiMs } = await withTiming(() =>
                 this.ai.analyze(context),
             );
-            log.timed("info", `✅ AI analysis complete: ${analysis.patches.length} file(s) to modify, ${analysis.commands.length} command(s) to run`, aiMs, {
+            log.timed("info", `✅ AI: ${analysis.patches.length} file(s), ${analysis.commands.length} command(s) (${(aiMs / 1000).toFixed(1)}s)`, aiMs, {
                 issueKey: issue.key,
                 step: "ai",
                 patches: analysis.patches.length,
@@ -136,22 +137,22 @@ export class PipelineHandler {
                 };
             }
 
-            // Step 4: Execute in Docker
-            log.info(`🐳 Running tests in isolated Docker container...`, { issueKey: issue.key, step: "exec" });
+            // ── Step 4: Docker Execution ────────────────────────────
+            log.info(`🐳 Running tests in Docker...`, { issueKey: issue.key, step: "exec" });
             const repoUrl = this.buildCloneUrl(repo);
             const { result: execution, duration_ms: execMs } = await withTiming(() =>
                 this.executor.execute(analysis, repoUrl, context.repo.defaultBranch)
             );
             
             if (execution.success) {
-                log.timed("info", `✅ Tests passed successfully!`, execMs, {
+                log.timed("info", `✅ Tests passed (${(execMs / 1000).toFixed(1)}s)`, execMs, {
                     issueKey: issue.key,
                     step: "exec",
                     exitCode: execution.exitCode,
                     success: true
                 });
             } else {
-                log.timed("warn", `❌ Tests failed (exit code: ${execution.exitCode})`, execMs, {
+                log.timed("warn", `❌ Tests failed — exit ${execution.exitCode} (${(execMs / 1000).toFixed(1)}s)`, execMs, {
                     issueKey: issue.key,
                     step: "exec",
                     exitCode: execution.exitCode,
@@ -159,7 +160,7 @@ export class PipelineHandler {
                 });
             }
 
-            // Step 5: Create branch + PR (only if execution succeeded and there are patches)
+            // ── Step 5: PR Creation ─────────────────────────────────
             let prUrl: string | null = null;
 
             const combinedPatches = [
@@ -168,17 +169,17 @@ export class PipelineHandler {
             ];
 
             if (execution.success && combinedPatches.length > 0) {
-                log.info(`🔀 Creating pull request...`, { issueKey: issue.key, step: "pr" });
+                log.info(`🔀 Creating PR...`, { issueKey: issue.key, step: "pr" });
                 const { result, duration_ms: prMs } = await withTiming(() =>
                     this.createBranchAndPr(issue, repo, analysis, combinedPatches, context.repo.defaultBranch)
                 );
                 prUrl = result;
-                log.timed("info", `✅ Pull request created: ${prUrl}`, prMs, { issueKey: issue.key, step: "pr", prUrl });
+                log.timed("info", `✅ PR: ${prUrl} (${(prMs / 1000).toFixed(1)}s)`, prMs, { issueKey: issue.key, step: "pr", prUrl });
             } else if (!execution.success) {
-                log.warn(`⏭️  Skipping PR creation (tests failed)`, { issueKey: issue.key, step: "pr" });
+                log.warn(`⏭️ Skipping PR (tests failed)`, { issueKey: issue.key, step: "pr" });
             }
 
-            // Step 6: Report to Jira
+            // ── Step 6: Report to Jira ──────────────────────────────
             const pipelineResult: PipelineResult = {
                 issueKey: issue.key,
                 success: execution.success,
@@ -195,7 +196,8 @@ export class PipelineHandler {
             // Update state
             if (execution.success) {
                 this.state.markSuccess(issue.key, prUrl ?? undefined);
-                log.info(`🎉 ${issue.key} completed successfully in ${Math.round(pipelineResult.duration_ms / 1000)}s`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
+                const totalSec = Math.round(pipelineResult.duration_ms / 1000);
+                log.info(`🎉 ${issue.key} done — ${totalSec}s total${prUrl ? ` → ${prUrl}` : ''}`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
             } else {
                 this.handleFailureState(issue.key, `Exit code: ${execution.exitCode}`);
             }
@@ -282,8 +284,17 @@ export class PipelineHandler {
         const branchName = `ai/${issue.key.toLowerCase()}-${slugify(issue.summary)}`;
 
         try {
-            // Create branch
-            await this.scm.createBranch(repo, branchName, defaultBranch);
+            // Create branch — if it already exists (e.g. from a previous attempt), continue with it
+            try {
+                await this.scm.createBranch(repo, branchName, defaultBranch);
+            } catch (branchErr: unknown) {
+                const msg = String(branchErr);
+                if (msg.includes("already exists") || msg.includes("Reference already exists") || msg.includes("422")) {
+                    log.warn(`Branch ${branchName} already exists, reusing it`);
+                } else {
+                    throw branchErr;
+                }
+            }
 
             // Commit patches
             for (const patch of patches) {
@@ -297,20 +308,31 @@ export class PipelineHandler {
                 );
             }
 
-            // Create PR
+            // Create PR — if it already exists, try to find the existing one
             const prTitle = `[${issue.key}] ${issue.summary}`;
             const prBody = `## Jira Issue: ${issue.key}\n\n${analysis.summary}\n\n### Changes\n${analysis.plan}\n\n---\n*This PR was created automatically by AI Cyber Bot.*`;
 
-            const prUrl = await this.scm.createPullRequest(
-                repo,
-                prTitle,
-                prBody,
-                branchName,
-                defaultBranch,
-            );
+            try {
+                const prUrl = await this.scm.createPullRequest(
+                    repo,
+                    prTitle,
+                    prBody,
+                    branchName,
+                    defaultBranch,
+                );
 
-            log.info(`PR created: ${prUrl}`);
-            return prUrl;
+                log.info(`PR created: ${prUrl}`);
+                return prUrl;
+            } catch (prErr: unknown) {
+                const prMsg = String(prErr);
+                if (prMsg.includes("already exists") || prMsg.includes("A pull request already exists") || prMsg.includes("422")) {
+                    log.warn(`PR already exists for branch ${branchName}, returning branch URL as fallback`);
+                    // Return a useful URL even if we can't get the exact PR URL
+                    const [owner, repoName] = repo.split("/");
+                    return `https://github.com/${owner}/${repoName}/compare/${defaultBranch}...${branchName}`;
+                }
+                throw prErr;
+            }
         } catch (e: unknown) {
             log.error(`Failed to create PR: ${String(e)}`);
             throw e;
@@ -319,32 +341,22 @@ export class PipelineHandler {
 
     /** Build clone URL for the repository */
     private buildCloneUrl(repo: string): string {
-        log.info(`Building clone URL from repository value: "${repo}"`);
-        
         // If repo is already a full URL, return it as-is
         if (repo.startsWith('https://') || repo.startsWith('http://')) {
-            log.info(`Repository is already a full URL: ${repo}`);
             return repo;
         }
         
-        // Otherwise, build URL based on SCM provider
-        let cloneUrl: string;
+        // Build URL based on SCM provider
         switch (this.config.scmProvider) {
             case "github":
-                cloneUrl = `https://github.com/${repo}.git`;
-                break;
+                return `https://github.com/${repo}.git`;
             case "gitlab":
-                cloneUrl = `${this.config.gitlabUrl}/${repo}.git`;
-                break;
+                return `${this.config.gitlabUrl}/${repo}.git`;
             case "bitbucket":
-                cloneUrl = `https://bitbucket.org/${repo}.git`;
-                break;
+                return `https://bitbucket.org/${repo}.git`;
             default:
-                cloneUrl = `https://github.com/${repo}.git`;
+                return `https://github.com/${repo}.git`;
         }
-        
-        log.info(`Built clone URL: ${cloneUrl}`);
-        return cloneUrl;
     }
 }
 

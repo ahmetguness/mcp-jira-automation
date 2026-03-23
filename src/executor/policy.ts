@@ -77,25 +77,53 @@ function validatePipInstallArgs(tokens: string[], startIndex: number, policy: Ex
 
 /** python / python3 */
 function validatePython(tokens: string[], policy: ExecPolicy): boolean {
-    const sub = tokens[1];
-    if (sub !== "-m") return false;
+    const arg = tokens[1];
+    if (!arg) return false;
 
-    const mod = tokens[2];
-    if (!mod) return false;
+    // Allow: python -m <module>
+    if (arg === "-m") {
+        const mod = tokens[2];
+        if (!mod) return false;
 
-    if (mod === "pytest") {
-        // python -m pytest ...
-        return true;
+        if (mod === "pytest") {
+            // python -m pytest ...
+            return true;
+        }
+
+        if (mod === "pip") {
+            // python -m pip install ...
+            const pipSub = tokens[3];
+            if (pipSub !== "install") return false;
+            return validatePipInstallArgs(tokens, 4, policy);
+        }
+
+        return false;
     }
 
-    if (mod === "pip") {
-        // python -m pip install ...
-        const pipSub = tokens[3];
-        if (pipSub !== "install") return false;
-        return validatePipInstallArgs(tokens, 4, policy);
+    // Allow: python <file.py> (direct file execution for test files)
+    // Check for safe filename first (no path traversal, no special chars)
+    // Allow dots in filename for patterns like auth.test.py
+    if (!/^[\w./-]+\.py$/.test(arg)) return false;
+    
+    // In strict mode, allow test files and backend paths
+    if (policy === "strict") {
+        // Allow test-*.py, *_test.py, tests/*.py, backend/test-*.py, backend/*.py
+        // But block setup.py, server.py, app.py, main.py, index.py
+        const blockedFiles = /^(setup|server|app|main|index)\.py$/;
+        const filename = arg.split('/').pop() || arg;
+        
+        if (blockedFiles.test(filename)) {
+            return false;
+        }
+        
+        // Allow if it's a test file pattern or in backend/tests directory
+        const isTestFile = /^(test[-_][\w.-]+\.py|[\w.-]+[-_]test\.py|[\w.-]+\.test\.py|tests\/[\w.-]+\.py|backend\/test[-_][\w.-]+\.py|backend\/tests\/[\w.-]+\.py|backend\/[\w.-]+\.py)$/.test(arg);
+        if (!isTestFile) {
+            return false;
+        }
     }
-
-    return false;
+    
+    return true;
 }
 
 /** pip / pip3 */
@@ -159,10 +187,10 @@ function validateNode(tokens: string[], policy: ExecPolicy): boolean {
     const file = tokens[1];
     if (!file) return false;
     
-    // In strict mode, only allow test files
+    // In strict mode, allow test files and backend paths
     if (policy === "strict") {
-        // Allow test-*.js, *.test.js, *.spec.js, tests/*.js
-        const isTestFile = /^(test-[\w-]+\.js|[\w-]+\.(test|spec)\.js|tests\/[\w-]+\.js)$/.test(file);
+        // Allow test-*.js, *.test.js, *.spec.js, tests/*.js, backend/test-*.js, backend/tests/*.js
+        const isTestFile = /^(test-[\w-]+\.js|[\w-]+\.(test|spec)\.js|tests\/[\w-]+\.js|backend\/test-[\w-]+\.js|backend\/tests\/[\w-]+\.js)$/.test(file);
         if (!isTestFile) {
             return false;
         }
@@ -185,8 +213,8 @@ const ALLOWLIST: AllowedCommand[] = [
     { bin: "node", validate: validateNode },
 
     // Python
-    { bin: "python", subcommands: ["-m"], validate: validatePython },
-    { bin: "python3", subcommands: ["-m"], validate: validatePython },
+    { bin: "python", validate: validatePython },
+    { bin: "python3", validate: validatePython },
     { bin: "pip", subcommands: ["install"], validate: validatePip },
     { bin: "pip3", subcommands: ["install"], validate: validatePip },
     { bin: "pytest", standalone: true, validate: validatePytest }, // ✅ allow pytest

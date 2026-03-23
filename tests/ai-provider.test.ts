@@ -28,9 +28,9 @@ describe("AI Provider Utilities", () => {
             expect(prompt).toContain("SAFE commands only");
         });
 
-        it("should always mandate Node.js for tests", () => {
+        it("should always mandate Python for tests", () => {
             const prompt = buildSystemPrompt();
-            expect(prompt).toContain("ALL TESTS IN NODE.JS");
+            expect(prompt).toContain("ALL TESTS IN PYTHON");
         });
 
         it("should include source code context for specified language", () => {

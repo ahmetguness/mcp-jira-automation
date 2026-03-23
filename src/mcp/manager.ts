@@ -101,7 +101,9 @@ export class McpManager {
 
     /** Call a tool on a specific MCP server */
     async callTool(connection: McpConnection, name: string, args: Record<string, unknown>): Promise<unknown> {
-        log.debug(`Calling ${connection.name}/${name}`, args);
+        if (name !== 'get_file_contents') {
+            log.debug(`Calling ${connection.name}/${name}`, args);
+        }
 
         const result = await connection.client.callTool({ name, arguments: args });
 

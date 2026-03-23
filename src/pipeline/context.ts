@@ -105,10 +105,27 @@ export async function buildTaskContext(
     const uniqueTests = [...new Set(testFilePaths)].slice(0, MAX_TEST_FILES);
 
     // Read files
+    const totalFiles = uniqueSource.length + uniqueTests.length;
+    let readCount = 0;
+    
+    const onProgress = (index: number, total: number, path: string) => {
+        readCount++;
+        if (process.stdout.isTTY && process.env.LOG_FORMAT !== "json") {
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            process.stdout.write(`\r\x1b[K[${time}] INFO: pipeline:context | Fetching file ${readCount}/${totalFiles}: ${path}`);
+        } else if (readCount === 1 || readCount === totalFiles || readCount % 20 === 0) {
+            log.info(`Fetching file ${readCount}/${totalFiles}: ${path}`);
+        }
+    };
+
     log.info(`Reading ${uniqueSource.length} source + ${uniqueTests.length} test files`);
 
-    const sourceFiles = await readFilesLimited(scm, repo, uniqueSource, branch);
-    const testFiles = await readFilesLimited(scm, repo, uniqueTests, branch);
+    const sourceFiles = await readFilesLimited(scm, repo, uniqueSource, branch, onProgress);
+    const testFiles = await readFilesLimited(scm, repo, uniqueTests, branch, onProgress);
+
+    if (process.stdout.isTTY && process.env.LOG_FORMAT !== "json") {
+        process.stdout.write('\n');
+    }
 
     log.info(`Context built: ${sourceFiles.length} source, ${testFiles.length} test files`);
 
@@ -174,15 +191,19 @@ function detectWorkdirFromFiles(allFiles: string[]): { workdir: string; workdirR
     return { workdir: "/workspace" };
 }
 
-/** Read files with size limiting */
+/** Read files with size limiting and progress logging */
 async function readFilesLimited(
     scm: ScmProvider,
     repo: string,
     paths: string[],
     branch: string,
+    onProgress?: (index: number, total: number, path: string) => void
 ): Promise<ScmFile[]> {
     const files: ScmFile[] = [];
-    for (const p of paths) {
+    const total = paths.length;
+    for (let i = 0; i < total; i++) {
+        const p = paths[i]!;
+        if (onProgress) onProgress(i + 1, total, p);
         try {
             let content = await scm.readFile(repo, p, branch);
             if (content.length > MAX_FILE_SIZE_CHARS) {
