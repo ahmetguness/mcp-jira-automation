@@ -8,6 +8,13 @@ BASIT_KULLANIM.md
 .kiro
 notes.txt
 
+# Temp/debug output files
+out.txt
+*.out.txt
+test_output*.txt
+tsc-errors.txt
+vitest-err.json
+
 # Prevent compiled JavaScript files in source directory
 src/**/*.js
 src/**/*.js.map

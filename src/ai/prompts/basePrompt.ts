@@ -521,5 +521,124 @@ QUALITY BAR
 - Print clear pass/fail messages with ✓ and ✗ symbols
 - Use three counters: passed, failed, skipped (all global integers)
 - Exit with code 0 if failed == 0 (skipped tests are OK), exit 1 if failed > 0
-- NEVER exit 1 just because a test was skipped`;
+- NEVER exit 1 just because a test was skipped
+
+FILE UPLOAD TESTING (multipart/form-data)
+================================================================================
+Some endpoints accept file uploads via multipart/form-data. Use Python stdlib
+to construct multipart requests WITHOUT any external libraries:
+
+\`\`\`python
+def make_multipart_request(method, path, fields=None, files=None, headers=None):
+    """Make a multipart/form-data request using stdlib only.
+    
+    fields: dict of {name: value} for text fields
+    files: list of {name, filename, content, content_type} dicts
+    """
+    import uuid
+    boundary = uuid.uuid4().hex
+    body_parts = []
+    
+    if fields:
+        for name, value in fields.items():
+            body_parts.append(
+                f'--{boundary}\\r\\n'
+                f'Content-Disposition: form-data; name="{name}"\\r\\n\\r\\n'
+                f'{value}\\r\\n'
+            )
+    
+    if files:
+        for f in files:
+            body_parts.append(
+                f'--{boundary}\\r\\n'
+                f'Content-Disposition: form-data; name="{f["name"]}"; filename="{f["filename"]}"\\r\\n'
+                f'Content-Type: {f.get("content_type", "application/octet-stream")}\\r\\n\\r\\n'
+            )
+            body_parts.append(f['content'])  # can be bytes or str
+            body_parts.append('\\r\\n')
+    
+    body_parts.append(f'--{boundary}--\\r\\n')
+    
+    # Build body as bytes
+    body_bytes = b''
+    for part in body_parts:
+        if isinstance(part, bytes):
+            body_bytes += part
+        else:
+            body_bytes += part.encode('utf-8')
+    
+    if headers is None:
+        headers = {}
+    headers['Content-Type'] = f'multipart/form-data; boundary={boundary}'
+    
+    # Use http.client directly
+    url = urlparse(BASE_URL + path)
+    conn = http.client.HTTPConnection(url.netloc, timeout=TIMEOUT)
+    conn.request(method, url.path, body=body_bytes, headers=headers)
+    response = conn.getresponse()
+    data = response.read().decode('utf-8')
+    try:
+        body = json.loads(data) if data else None
+    except json.JSONDecodeError:
+        body = data
+    conn.close()
+    return {'status': response.status, 'body': body, 'headers': dict(response.getheaders())}
+\`\`\`
+
+For file upload tests:
+- Create a small dummy file: b'\\x89PNG\\r\\n\\x1a\\n' + b'\\x00' * 100 (fake PNG)
+- Or use a simple text file: b'test file content'
+- Test with valid auth token (uploads usually require auth)
+- Test without auth (expect 401/403)
+- Test with invalid file type if the API validates file types
+================================================================================
+
+QUERY PARAMETER TESTING
+================================================================================
+Some endpoints use query parameters for filtering, searching, or lookups.
+Always include query params directly in the path string:
+
+\`\`\`python
+# Simple query parameter
+response = make_request('GET', '/api/bookings/lookup?phone=1234567890')
+
+# Multiple query parameters
+response = make_request('GET', '/api/cars?brand=Toyota&category=SUV&page=1&limit=10')
+
+# URL-encode special characters
+from urllib.parse import quote
+search_term = quote("hello world")
+response = make_request('GET', f'/api/search?q={search_term}')
+\`\`\`
+
+When testing query parameter endpoints:
+- Test with valid parameters (expect 200 + results)
+- Test with missing required parameters (expect 400 or empty results)
+- Test with invalid parameter values (expect 400 or empty results)
+- Test pagination parameters: page, limit, offset, skip
+- Test sorting parameters: sort, order, sortBy, orderBy
+- Test filter parameters: look at the source code for supported filters
+================================================================================
+
+ADMIN / SEED DATA HANDLING
+================================================================================
+Some endpoints require admin privileges (e.g., POST /cars for admin-only CRUD).
+The database starts EMPTY, so admin users may not exist.
+
+Strategy:
+1. First try to register a normal user and use that token
+2. If an endpoint returns 403 (Forbidden), it likely needs admin role
+3. Check the source code for:
+   - Seed scripts (npm run seed, prisma db seed, seeders/ directory)
+   - Default admin credentials in seed files or .env.example
+   - Role assignment in the registration flow
+4. If the API has a role system, check if register allows setting role
+   (some APIs accept { role: "admin" } in register body)
+5. If admin access is impossible without seeding, SKIP admin-only tests
+   gracefully (increment skipped, not failed)
+6. Print a clear message: "⚠ SKIPPED: Admin access required but no seed data"
+
+NEVER fail a test just because you don't have admin access. Skip it.
+================================================================================`;
+
 }

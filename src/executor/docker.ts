@@ -226,13 +226,13 @@ export class DockerExecutor {
             // On Docker Desktop (Windows/WSL2), removing the scout before the
             // main container mounts the shared volume corrupts the overlayfs
             // layer, causing "lstat … invalid argument" errors.
+            //
+            // STRATEGY: Always use the SERVER's native image so the app runs
+            // natively. Python (for tests) is installed inside the container
+            // in Phase 4.1 if missing.
             let targetImage: string;
             
-            // CRITICAL: If environmentHint is "python", force Python image
-            // This is needed because AI generates Python tests regardless of server language
-            if (opts.environmentHint === "python") {
-                targetImage = "python:3.12-bookworm";
-            } else if (this.configImage !== "auto") {
+            if (this.configImage !== "auto") {
                 targetImage = this.configImage;
 
                 // Smart Override: Don't use a forced image if it conflicts with the detected language
@@ -326,25 +326,48 @@ export class DockerExecutor {
             await scoutContainer.remove({ force: true }).catch(() => { /* ignore */ });
             scoutContainer = null;
 
-            // Phase 4.1: Install dependencies
-            // For Python test execution on Node.js projects, install Node.js and dependencies
-            // so the server can run (Python tests make HTTP requests to it)
-            if (opts.environmentHint === "python" && detection.language === "node") {
-                log.info("📦 Installing Node.js in Python container...");
+            // Phase 4.1: Ensure Python + curl are available in the container
+            // Tests are ALWAYS Python, but the container image is the server's native image.
+            // We need: python3 (+ python symlink), curl (for health checks)
+            {
+                log.info("🔧 Ensuring python3 and curl are available...");
+                const ensureToolsScript = [
+                    // Check and install curl
+                    'command -v curl > /dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1)',
+                    // Check and install python3 + create python symlink
+                    'if ! command -v python3 > /dev/null 2>&1; then apt-get update -qq; apt-get install -y -qq python3 > /dev/null 2>&1; fi',
+                    'if ! command -v python > /dev/null 2>&1 && command -v python3 > /dev/null 2>&1; then ln -sf $(which python3) /usr/local/bin/python; fi',
+                ].join(' && ');
+                const toolsResult = await this.execInContainer(
+                    mainContainer,
+                    ["sh", "-c", ensureToolsScript],
+                    mainWorkdir,
+                    120_000
+                );
+                allOutput.push(toolsResult.output);
+                if (toolsResult.exitCode !== 0) {
+                    log.warn("python3/curl install had issues — tests may still work");
+                } else {
+                    log.debug("✅ python3 + curl ready");
+                }
+            }
+
+            // Phase 4.1.1: For Node.js servers running in non-Node images, install Node.js
+            if (detection.language === "node" && !targetImage.startsWith("node:") && !targetImage.startsWith("oven/bun")) {
+                log.info("📦 Installing Node.js (server needs it)...");
                 const nodeInstallResult = await this.execInContainer(
                     mainContainer,
-                    ["sh", "-c", "command -v node || (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs) && npm install -g tsx"],
+                    ["sh", "-c", "command -v node > /dev/null 2>&1 || (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs) && npm install -g tsx"],
                     mainWorkdir,
-                    300_000 // 5 minutes timeout
+                    300_000
                 );
                 allOutput.push(nodeInstallResult.output);
-                
                 if (nodeInstallResult.exitCode !== 0) {
                     log.error("Node.js installation failed");
                     return {
                         exitCode: nodeInstallResult.exitCode,
                         stdout: allOutput.join("\n").slice(0, 50000),
-                        stderr: "Node.js installation failed in Python container",
+                        stderr: "Node.js installation failed",
                     };
                 }
                 log.info("✅ Node.js installed");
@@ -846,17 +869,113 @@ ps aux | grep node | grep -v grep || echo "No node processes"
     # Set common environment variables that apps might need
     export NODE_ENV=test
     export PORT=3001
+    export FLASK_APP=app.py
+    export FLASK_ENV=testing
+    export DJANGO_SETTINGS_MODULE=config.settings
 
     echo "Starting server..."
-    echo "Environment variables set:"
-    echo "NODE_ENV=$NODE_ENV"
-    echo "PORT=$PORT"
-    echo "MONGODB_URL=$MONGODB_URL"
-    echo "JWT_SECRET=$JWT_SECRET"
-
-    # Track attempted methods for diagnostics
     ATTEMPTED_METHODS=""
 
+    # ─── Python server detection ───
+    try_python_server() {
+      # Django
+      if [ -f "manage.py" ]; then
+        echo "Django project detected"
+        ATTEMPTED_METHODS="$ATTEMPTED_METHODS, django: manage.py runserver"
+        python manage.py runserver 0.0.0.0:$PORT 2>&1 &
+        SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+        sleep 3
+        if kill -0 $SERVER_PID 2>/dev/null; then echo "Django started"; exit 0; fi
+      fi
+      # FastAPI (uvicorn)
+      for ENTRY in main.py app.py src/main.py src/app.py; do
+        if [ -f "$ENTRY" ] && grep -q "FastAPI\|fastapi" "$ENTRY" 2>/dev/null; then
+          PYMODULE=$(echo "$ENTRY" | sed 's|/|.|g; s|\.py$||')
+          echo "FastAPI detected: $ENTRY"
+          ATTEMPTED_METHODS="$ATTEMPTED_METHODS, fastapi: $PYMODULE"
+          if command -v uvicorn > /dev/null 2>&1; then
+            uvicorn "$PYMODULE:app" --host 0.0.0.0 --port $PORT 2>&1 &
+          else
+            python -m uvicorn "$PYMODULE:app" --host 0.0.0.0 --port $PORT 2>&1 &
+          fi
+          SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+          sleep 3
+          if kill -0 $SERVER_PID 2>/dev/null; then echo "FastAPI started"; exit 0; fi
+        fi
+      done
+      # Flask
+      for ENTRY in app.py main.py src/app.py src/main.py; do
+        if [ -f "$ENTRY" ] && grep -q "Flask\|flask" "$ENTRY" 2>/dev/null; then
+          echo "Flask detected: $ENTRY"
+          ATTEMPTED_METHODS="$ATTEMPTED_METHODS, flask: $ENTRY"
+          python "$ENTRY" 2>&1 &
+          SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+          sleep 3
+          if kill -0 $SERVER_PID 2>/dev/null; then echo "Flask started"; exit 0; fi
+        fi
+      done
+    }
+
+    # ─── Go server detection ───
+    try_go_server() {
+      if [ -f "go.mod" ]; then
+        echo "Go project detected"
+        ATTEMPTED_METHODS="$ATTEMPTED_METHODS, go: go run ."
+        go run . 2>&1 &
+        SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+        sleep 5
+        if kill -0 $SERVER_PID 2>/dev/null; then echo "Go server started"; exit 0; fi
+        # Try main.go directly
+        if [ -f "main.go" ]; then
+          go run main.go 2>&1 &
+          SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+          sleep 5
+          if kill -0 $SERVER_PID 2>/dev/null; then echo "Go server started"; exit 0; fi
+        fi
+        # Try cmd/server pattern
+        for CMD_DIR in cmd/server cmd/api cmd/main; do
+          if [ -d "$CMD_DIR" ]; then
+            go run "./$CMD_DIR" 2>&1 &
+            SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+            sleep 5
+            if kill -0 $SERVER_PID 2>/dev/null; then echo "Go server started from $CMD_DIR"; exit 0; fi
+          fi
+        done
+      fi
+    }
+
+    # ─── Java server detection ───
+    try_java_server() {
+      # Spring Boot with Maven
+      if [ -f "pom.xml" ]; then
+        echo "Maven project detected"
+        ATTEMPTED_METHODS="$ATTEMPTED_METHODS, java: mvn spring-boot:run"
+        if [ -f "mvnw" ]; then
+          ./mvnw spring-boot:run -Dspring-boot.run.arguments="--server.port=$PORT" 2>&1 &
+        else
+          mvn spring-boot:run -Dspring-boot.run.arguments="--server.port=$PORT" 2>&1 &
+        fi
+        SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+        sleep 15
+        if kill -0 $SERVER_PID 2>/dev/null; then echo "Spring Boot started"; exit 0; fi
+      fi
+      # Gradle
+      if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+        echo "Gradle project detected"
+        ATTEMPTED_METHODS="$ATTEMPTED_METHODS, java: gradle bootRun"
+        if [ -f "gradlew" ]; then
+          ./gradlew bootRun --args="--server.port=$PORT" 2>&1 &
+        else
+          gradle bootRun --args="--server.port=$PORT" 2>&1 &
+        fi
+        SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+        sleep 15
+        if kill -0 $SERVER_PID 2>/dev/null; then echo "Spring Boot (Gradle) started"; exit 0; fi
+      fi
+    }
+
+    # ─── Node.js server detection (existing logic) ───
+    try_node_server() {
     # Stage 1: Check package.json for start script
     if [ -f "package.json" ]; then
       echo "Checking package.json for start script..."
@@ -864,172 +983,90 @@ ps aux | grep node | grep -v grep || echo "No node processes"
 
       if [ -n "$START_SCRIPT" ]; then
         echo "Found start script in package.json: $START_SCRIPT"
-        ATTEMPTED_METHODS="package.json start script: $START_SCRIPT"
+        ATTEMPTED_METHODS="$ATTEMPTED_METHODS, package.json start: $START_SCRIPT"
 
-        # Check if start script references a dist/ file that doesn't exist
-        # This happens when TypeScript projects haven't been built yet
         DIST_FILE=$(echo "$START_SCRIPT" | grep -o 'dist/[^ ]*' || true)
         if [ -n "$DIST_FILE" ] && [ ! -f "$DIST_FILE" ]; then
           echo "Start script references $DIST_FILE but it does not exist (TypeScript not built)"
           echo "Skipping package.json start script, will try tsx with source files instead"
-          ATTEMPTED_METHODS="$ATTEMPTED_METHODS (skipped: dist not built)"
         else
-          # Execute the start script
           eval "$START_SCRIPT" 2>&1 &
-          SERVER_PID=$!
-          echo $SERVER_PID > /tmp/server.pid
-          echo "Server PID: $SERVER_PID"
-
-          # Wait a moment to see if server crashes immediately
+          SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
           sleep 3
-          if kill -0 $SERVER_PID 2>/dev/null; then
-            echo "Server started successfully using package.json start script"
-            exit 0
-          else
-            echo "Server process died after starting with package.json script"
-            ATTEMPTED_METHODS="$ATTEMPTED_METHODS (failed)"
-          fi
+          if kill -0 $SERVER_PID 2>/dev/null; then echo "Server started via package.json"; exit 0; fi
+          echo "Server process died after starting with package.json script"
         fi
-      else
-        echo "No start script found in package.json"
       fi
     fi
 
-    # Stage 2: File system search with expanded patterns
+    # Stage 2: File system search
     echo "Searching for server entry point..."
     FOUND_ENTRY_POINT=""
-    ATTEMPTED_PATHS=""
-
-    # Define location and filename patterns
     LOCATIONS=". src backend backend/src server server/src api api/src"
     FILENAMES="server.js server.ts index.js index.ts main.js main.ts start.js start.ts app.js app.ts"
 
-    # Check standard locations first (for backward compatibility)
     for LOCATION in $LOCATIONS; do
       for FILENAME in $FILENAMES; do
-        if [ "$LOCATION" = "." ]; then
-          ENTRY_PATH="$FILENAME"
-        else
-          ENTRY_PATH="$LOCATION/$FILENAME"
-        fi
-
-        ATTEMPTED_PATHS="$ATTEMPTED_PATHS $ENTRY_PATH"
-
+        if [ "$LOCATION" = "." ]; then ENTRY_PATH="$FILENAME"; else ENTRY_PATH="$LOCATION/$FILENAME"; fi
         if [ -f "$ENTRY_PATH" ]; then
-          echo "Found server entry point: $ENTRY_PATH"
           FOUND_ENTRY_POINT="$ENTRY_PATH"
           break 2
         fi
       done
     done
 
-    # Check packages/* pattern for monorepos
     if [ -z "$FOUND_ENTRY_POINT" ] && [ -d "packages" ]; then
-      echo "Checking packages/* for monorepo structure..."
       for PKG_DIR in packages/*; do
         if [ -d "$PKG_DIR" ]; then
           for FILENAME in $FILENAMES; do
-            # Check packages/*/filename
-            ENTRY_PATH="$PKG_DIR/$FILENAME"
-            ATTEMPTED_PATHS="$ATTEMPTED_PATHS $ENTRY_PATH"
-            if [ -f "$ENTRY_PATH" ]; then
-              echo "Found server entry point: $ENTRY_PATH"
-              FOUND_ENTRY_POINT="$ENTRY_PATH"
-              break 2
-            fi
-
-            # Check packages/*/src/filename
-            ENTRY_PATH="$PKG_DIR/src/$FILENAME"
-            ATTEMPTED_PATHS="$ATTEMPTED_PATHS $ENTRY_PATH"
-            if [ -f "$ENTRY_PATH" ]; then
-              echo "Found server entry point: $ENTRY_PATH"
-              FOUND_ENTRY_POINT="$ENTRY_PATH"
-              break 2
-            fi
+            for SUB in "" "/src"; do
+              ENTRY_PATH="$PKG_DIR$SUB/$FILENAME"
+              if [ -f "$ENTRY_PATH" ]; then FOUND_ENTRY_POINT="$ENTRY_PATH"; break 3; fi
+            done
           done
         fi
       done
     fi
 
-    # Start the server if entry point was found
     if [ -n "$FOUND_ENTRY_POINT" ]; then
       echo "Starting server with: $FOUND_ENTRY_POINT"
       ATTEMPTED_METHODS="$ATTEMPTED_METHODS, file search: $FOUND_ENTRY_POINT"
-      
-      # Check if it's a TypeScript file
       case "$FOUND_ENTRY_POINT" in
-        *.ts)
-          echo "TypeScript file detected, using tsx"
-          npx -y tsx "$FOUND_ENTRY_POINT" 2>&1 &
-          ;;
-        *)
-          node "$FOUND_ENTRY_POINT" 2>&1 &
-          ;;
+        *.ts) npx -y tsx "$FOUND_ENTRY_POINT" 2>&1 & ;;
+        *) node "$FOUND_ENTRY_POINT" 2>&1 & ;;
       esac
-      
-      SERVER_PID=$!
-      echo $SERVER_PID > /tmp/server.pid
-      echo "Server PID: $SERVER_PID"
-
-      # Wait longer for TypeScript compilation + server init (tsx needs more time)
+      SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
       sleep 5
-      if kill -0 $SERVER_PID 2>/dev/null; then
-        echo "Server started successfully using file search"
-        exit 0
-      else
-        echo "Server process died after starting with file search"
-        ATTEMPTED_METHODS="$ATTEMPTED_METHODS (failed)"
-      fi
+      if kill -0 $SERVER_PID 2>/dev/null; then echo "Server started via file search"; exit 0; fi
+      echo "Server process died after starting with file search"
     fi
 
-    # Stage 3: Fallback with require pattern (for backward compatibility)
-    echo "No entry point found via file search, trying require pattern"
-    ATTEMPTED_METHODS="$ATTEMPTED_METHODS, require pattern: require('./src/app').listen(3001)"
+    # Stage 3: Fallback require pattern
+    ATTEMPTED_METHODS="$ATTEMPTED_METHODS, require pattern"
     node -e "require('./src/app').listen(3001)" 2>&1 &
-    SERVER_PID=$!
-    echo $SERVER_PID > /tmp/server.pid
-    echo "Server PID: $SERVER_PID"
-
-    # Wait a moment to see if server crashes immediately
+    SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
     sleep 2
     if ! kill -0 $SERVER_PID 2>/dev/null; then
-      echo "=========================================="
-      echo "ERROR: All server startup attempts failed"
-      echo "=========================================="
-      echo ""
-      echo "Stage 1 - Package.json Script Discovery:"
-      if [ -f "package.json" ]; then
-        if echo "$ATTEMPTED_METHODS" | grep -q "package.json start script"; then
-          echo "  ✗ Found start script but server process died"
-        else
-          echo "  ✗ No start script found in package.json"
-        fi
-      else
-        echo "  ✗ No package.json file found"
-      fi
-      echo ""
-      echo "Stage 2 - File System Search:"
-      echo "  ✗ No valid server entry point found"
-      echo "  Attempted paths:"
-      for PATH_ITEM in $ATTEMPTED_PATHS; do
-        echo "    - $PATH_ITEM"
-      done
-      echo ""
-      echo "Stage 3 - Require Pattern Fallback:"
-      echo "  ✗ Server process died immediately after starting"
-      echo "  This usually means the app crashed during initialization"
-      echo ""
-      echo "Summary of attempted methods:"
-      echo "$ATTEMPTED_METHODS"
-      echo ""
-      echo "=========================================="
-      echo "Troubleshooting suggestions:"
-      echo "1. Ensure your server entry point is in one of the searched locations"
-      echo "2. Add a 'start' script to package.json pointing to your server file"
-      echo "3. Check that your server file exports a valid Express/HTTP server"
-      echo "4. Review server logs above for initialization errors"
-      echo "=========================================="
+      echo "ERROR: All Node.js server startup attempts failed"
     fi
+    }
+
+    # ─── Auto-detect and try the right language ───
+    # Try based on detected project files
+    if [ -f "manage.py" ] || [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+      try_python_server
+    fi
+    if [ -f "go.mod" ]; then
+      try_go_server
+    fi
+    if [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+      try_java_server
+    fi
+    if [ -f "package.json" ]; then
+      try_node_server
+    fi
+
+    echo "No server could be started. Attempted: $ATTEMPTED_METHODS"
     `;
 
             try {
@@ -1267,6 +1304,79 @@ ps aux | grep node | grep -v grep || echo "No node processes"
                         if (regex.test(content)) {
                             detectedDatabases.add(dbType);
                             log.debug(`Detected ${dbType} dependency: ${packageName}`);
+                        }
+                    }
+                }
+            } else if (language === 'go') {
+                // Check go.mod for Go dependencies
+                const result = await this.execInContainer(container, ['cat', '/workspace/go.mod']);
+                if (result.exitCode === 0 && result.output.trim()) {
+                    const content = result.output;
+                    const goDbPackages: Record<string, string> = {
+                        'github.com/lib/pq': 'postgresql',
+                        'github.com/jackc/pgx': 'postgresql',
+                        'gorm.io/driver/postgres': 'postgresql',
+                        'go.mongodb.org/mongo-driver': 'mongodb',
+                        'github.com/go-sql-driver/mysql': 'mysql',
+                        'gorm.io/driver/mysql': 'mysql',
+                        'github.com/go-redis/redis': 'redis',
+                        'github.com/redis/go-redis': 'redis',
+                        'gorm.io/driver/sqlite': 'sqlite',
+                        'github.com/mattn/go-sqlite3': 'sqlite',
+                        'gorm.io/gorm': 'postgresql', // GORM default fallback
+                    };
+                    for (const [pkg, dbType] of Object.entries(goDbPackages)) {
+                        if (content.includes(pkg)) {
+                            detectedDatabases.add(dbType);
+                            log.debug(`Detected ${dbType} dependency: ${pkg} (go.mod)`);
+                        }
+                    }
+                }
+            } else if (language === 'java') {
+                // Check pom.xml and build.gradle for Java dependencies
+                const javaDbPatterns: Record<string, string> = {
+                    'postgresql': 'postgresql',
+                    'mysql-connector': 'mysql',
+                    'mariadb-java-client': 'mysql',
+                    'mongodb-driver': 'mongodb',
+                    'spring-boot-starter-data-mongodb': 'mongodb',
+                    'spring-boot-starter-data-redis': 'redis',
+                    'jedis': 'redis',
+                    'lettuce-core': 'redis',
+                    'sqlite-jdbc': 'sqlite',
+                    'h2': 'postgresql', // H2 in-memory, treat as postgresql for compat
+                    'spring-boot-starter-data-jpa': 'postgresql', // JPA default fallback
+                };
+                for (const configFile of ['/workspace/pom.xml', '/workspace/build.gradle', '/workspace/build.gradle.kts']) {
+                    const result = await this.execInContainer(container, ['cat', configFile]);
+                    if (result.exitCode === 0 && result.output.trim()) {
+                        const content = result.output;
+                        for (const [pattern, dbType] of Object.entries(javaDbPatterns)) {
+                            if (content.includes(pattern)) {
+                                detectedDatabases.add(dbType);
+                                log.debug(`Detected ${dbType} dependency: ${pattern} (${configFile})`);
+                            }
+                        }
+                    }
+                }
+            } else if (language === 'rust') {
+                // Check Cargo.toml for Rust dependencies
+                const result = await this.execInContainer(container, ['cat', '/workspace/Cargo.toml']);
+                if (result.exitCode === 0 && result.output.trim()) {
+                    const content = result.output;
+                    const rustDbPackages: Record<string, string> = {
+                        'diesel': 'postgresql',
+                        'sqlx': 'postgresql',
+                        'tokio-postgres': 'postgresql',
+                        'mongodb': 'mongodb',
+                        'redis': 'redis',
+                        'rusqlite': 'sqlite',
+                    };
+                    for (const [pkg, dbType] of Object.entries(rustDbPackages)) {
+                        // Match crate name in [dependencies] section
+                        if (content.includes(`${pkg} `) || content.includes(`${pkg}=`) || content.includes(`"${pkg}"`)) {
+                            detectedDatabases.add(dbType);
+                            log.debug(`Detected ${dbType} dependency: ${pkg} (Cargo.toml)`);
                         }
                     }
                 }
@@ -1567,6 +1677,81 @@ ps aux | grep node | grep -v grep || echo "No node processes"
 
         if (hasOrm('---MONGOOSE---')) {
             log.debug('Mongoose detected — no migration needed');
+        }
+
+        // Run seed scripts if available (admin/test data)
+        await this.runSeedScripts(container, workdir);
+    }
+
+    /**
+     * Detect and run seed scripts to populate initial data (admin users, test data).
+     * Supports: npm run seed, npx prisma db seed, python manage.py seed, etc.
+     */
+    private async runSeedScripts(container: Docker.Container, workdir: string): Promise<void> {
+        // Check for common seed mechanisms
+        const seedCheck = await this.execInContainer(
+            container,
+            ['sh', '-c', [
+                'echo "---PKG_SEED---"',
+                // Check if package.json has a "seed" script
+                'cat package.json 2>/dev/null | grep -q \'"seed"\' && echo "yes" || echo "no"',
+                'echo "---PRISMA_SEED---"',
+                // Check if prisma schema has a seed config
+                'cat prisma/schema.prisma 2>/dev/null | grep -q "seed" && echo "yes" || (cat package.json 2>/dev/null | grep -q \'"prisma".*"seed"\' && echo "yes" || echo "no")',
+                'echo "---DJANGO_MANAGE---"',
+                'test -f manage.py && echo "yes" || echo "no"',
+                'echo "---SEEDERS_DIR---"',
+                // Check for seeders directory (Sequelize, custom)
+                'test -d seeders && echo "yes" || (test -d src/seeders && echo "yes" || echo "no")',
+            ].join(' && ')],
+            workdir,
+            5000
+        );
+
+        const seedOutput = seedCheck.output;
+        const hasSeed = (marker: string) => {
+            const idx = seedOutput.indexOf(marker);
+            if (idx === -1) return false;
+            const after = seedOutput.slice(idx + marker.length).trim();
+            return after.startsWith('yes');
+        };
+
+        if (hasSeed('---PKG_SEED---')) {
+            log.info('🌱 Running npm seed script...');
+            const result = await this.execInContainer(
+                container,
+                ['sh', '-c', 'npm run seed 2>&1 || echo "Seed script failed (non-fatal)"'],
+                workdir,
+                60000
+            );
+            if (result.exitCode === 0) {
+                log.info('✅ Seed script completed');
+            } else {
+                log.debug(`Seed script exited with code ${result.exitCode} (non-fatal)`);
+            }
+        } else if (hasSeed('---PRISMA_SEED---')) {
+            log.info('🌱 Running Prisma seed...');
+            const result = await this.execInContainer(
+                container,
+                ['sh', '-c', 'npx prisma db seed 2>&1 || echo "Prisma seed failed (non-fatal)"'],
+                workdir,
+                60000
+            );
+            if (result.exitCode === 0) {
+                log.info('✅ Prisma seed completed');
+            } else {
+                log.debug(`Prisma seed exited with code ${result.exitCode} (non-fatal)`);
+            }
+        }
+
+        if (hasSeed('---DJANGO_MANAGE---')) {
+            log.info('🌱 Running Django seed...');
+            await this.execInContainer(
+                container,
+                ['sh', '-c', 'python manage.py migrate 2>&1 && (python manage.py loaddata initial_data 2>&1 || python manage.py seed 2>&1 || true)'],
+                workdir,
+                60000
+            );
         }
     }
 
