@@ -18,7 +18,7 @@ export class TaskAnalyzer {
 
   constructor(repositoryResolver: RepositoryResolver) {
     this.repositoryResolver = repositoryResolver;
-    log.info('TaskAnalyzer initialized');
+    log.debug('TaskAnalyzer initialized');
   }
 
   /**

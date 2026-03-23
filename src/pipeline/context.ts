@@ -49,7 +49,7 @@ export async function buildTaskContext(
     scm: ScmProvider,
     repo: string,
 ): Promise<TaskContext> {
-    log.info(`Building context for ${issue.key} from ${repo}`);
+    log.debug(`Building context for ${issue.key} from ${repo}`);
 
     // Get repo info
     const repoInfo: RepoInfo = await scm.getRepoInfo(repo);
@@ -113,12 +113,14 @@ export async function buildTaskContext(
         if (process.stdout.isTTY && process.env.LOG_FORMAT !== "json") {
             const time = new Date().toLocaleTimeString('en-US', { hour12: false });
             process.stdout.write(`\r\x1b[K[${time}] INFO: pipeline:context | Fetching file ${readCount}/${totalFiles}: ${path}`);
-        } else if (readCount === 1 || readCount === totalFiles || readCount % 20 === 0) {
-            log.info(`Fetching file ${readCount}/${totalFiles}: ${path}`);
+        }
+        // In non-TTY/JSON mode, only log first and last
+        else if (readCount === 1 || readCount === totalFiles) {
+            log.debug(`Fetching file ${readCount}/${totalFiles}: ${path}`);
         }
     };
 
-    log.info(`Reading ${uniqueSource.length} source + ${uniqueTests.length} test files`);
+    log.debug(`Reading ${uniqueSource.length} source + ${uniqueTests.length} test files`);
 
     const sourceFiles = await readFilesLimited(scm, repo, uniqueSource, branch, onProgress);
     const testFiles = await readFilesLimited(scm, repo, uniqueTests, branch, onProgress);
@@ -127,7 +129,7 @@ export async function buildTaskContext(
         process.stdout.write('\n');
     }
 
-    log.info(`Context built: ${sourceFiles.length} source, ${testFiles.length} test files`);
+    log.debug(`Context built: ${sourceFiles.length} source, ${testFiles.length} test files`);
 
     const runtimeSelection = determineRuntime(
         mentionedFiles,
@@ -135,12 +137,12 @@ export async function buildTaskContext(
         allFiles
     );
 
-    log.info(`Detected runtime: ${runtimeSelection.primary} (isMulti: ${runtimeSelection.isMulti})`);
+    log.debug(`Runtime: ${runtimeSelection.primary} (isMulti: ${runtimeSelection.isMulti})`);
 
     // Detect workdir from project structure (for monorepos)
     const workdirInfo = detectWorkdirFromFiles(allFiles);
     if (workdirInfo.workdirRelative) {
-        log.info(`Detected monorepo structure: workdir=${workdirInfo.workdirRelative}`);
+        log.debug(`Monorepo workdir: ${workdirInfo.workdirRelative}`);
     }
 
     return {

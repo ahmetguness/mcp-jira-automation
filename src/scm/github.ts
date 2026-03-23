@@ -28,7 +28,7 @@ export class GitHubProvider implements ScmProvider {
             const commonBranches = ["master", "main", "develop"];
             for (const branch of commonBranches) {
                 if (branchNames.has(branch)) {
-                    log.info(`Detected default branch: ${branch}`);
+                    log.debug(`Default branch: ${branch}`);
                     return {
                         name: repo,
                         defaultBranch: branch,
@@ -141,7 +141,7 @@ export class GitHubProvider implements ScmProvider {
             from_branch: base,
         });
 
-        log.info(`Created branch ${branchName} from ${base}`);
+        log.debug(`Created branch ${branchName} from ${base}`);
     }
 
     async writeFile(repo: string, path: string, content: string, message: string, branch: string): Promise<void> {
@@ -187,7 +187,7 @@ export class GitHubProvider implements ScmProvider {
 
             // if it's already a URL, we're done
             if (url.startsWith("http://") || url.startsWith("https://")) {
-                log.info(`Created PR: ${url}`);
+                log.debug(`Created PR: ${url}`);
                 return url;
             }
 
@@ -197,7 +197,7 @@ export class GitHubProvider implements ScmProvider {
                 const prObj = parseGitHubPullRequest(parsed);
                 const prUrl = prObj?.html_url ?? prObj?.url ?? "";
                 if (!prUrl) throw new Error("Parsed PR object did not include a URL.");
-                log.info(`Created PR: ${prUrl}`);
+                log.debug(`Created PR: ${prUrl}`);
                 return prUrl;
             } catch {
                 throw new Error(`Invalid GitHub PR: create_pull_request returned string but not a URL/object: ${url}`);
@@ -212,7 +212,7 @@ export class GitHubProvider implements ScmProvider {
             throw new Error(`Invalid GitHub PR: create_pull_request returned an object without html_url/url.`);
         }
 
-        log.info(`Created PR: ${prUrl}`);
+        log.debug(`Created PR: ${prUrl}`);
         return prUrl;
     }
 

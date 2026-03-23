@@ -36,6 +36,10 @@ CRITICAL: BEFORE CREATING TEST CODE
    - Look for app.use(), router.get(), router.post(), @Get(), @Post() etc.
    - Pay attention to route prefixes (e.g., app.use('/api/v1', router))
    - The actual path may differ from what the Jira issue says — USE THE CODE
+   - TRACE THE FULL PATH: if app.ts has app.use('/api', mainRouter) and
+     mainRouter has router.use('/cars', carsRouter), the full path is /api/cars
+   - If the Jira issue says "POST /cars" but the code shows the route is
+     mounted at "/api/cars", you MUST use "/api/cars" in your tests
 3. IDENTIFY the server entry point (if applicable):
    - For Node.js: Look for app.js, server.js, index.js, main.js
    - For Python: Look for app.py, main.py, server.py, wsgi.py
@@ -49,6 +53,10 @@ CRITICAL: BEFORE CREATING TEST CODE
 6. DETECT ID format: When testing GET /resource/{id}, first call the list
    endpoint to get a real ID. Use that ID for single-resource tests.
    If no items exist, skip the single-resource test gracefully.
+7. DETECT AUTH REQUIREMENTS: Check if endpoints use auth middleware
+   (e.g., authMiddleware, requireAuth, isAuthenticated, passport.authenticate,
+   verifyToken, protect, guard). If they do, you MUST set up authentication
+   before testing those endpoints. See AUTH FLOW section below.
 
 SERVER STARTUP (IMPORTANT!)
 Python tests do NOT start the server. The test execution system will automatically
@@ -64,6 +72,130 @@ The test execution system will:
   3. Set SERVER_PORT env var to the detected port
   4. Run your Python test
   5. Clean up after tests complete
+
+AUTHENTICATION FLOW (FOR PROTECTED ENDPOINTS)
+================================================================================
+Many APIs require authentication. The database starts EMPTY, so there are no
+existing users. If the endpoint you're testing requires auth, you MUST:
+
+1. DETECT auth routes by reading the source code:
+   - Look for /auth/register, /auth/signup, /auth/login, /auth/signin
+   - Look for /users/register, /users/login, /api/v1/auth/*, etc.
+   - Read the route handler to understand required fields (email, password, name, etc.)
+
+2. CREATE a test user by calling the register endpoint:
+   - Use a unique test email like "testbot@example.com"
+   - Use a strong enough password that passes validation (e.g., "TestPass123!")
+   - Include all required fields from the registration schema
+
+3. LOGIN to get a token:
+   - Call the login endpoint with the test credentials
+   - Extract the token from the response (look for: token, accessToken,
+     access_token, jwt, data.token, data.accessToken, etc.)
+
+4. USE the token in subsequent requests:
+   - Add header: Authorization: Bearer <token>
+   - Some APIs use: x-auth-token, x-access-token, or cookie-based auth
+
+5. IMPLEMENT this as a setup_auth() helper function that runs ONCE before
+   all tests and stores the token in a global variable.
+
+EXAMPLE AUTH HELPER (adapt field names from source code):
+\`\`\`python
+auth_token = None
+
+def setup_auth():
+    """Register a test user and login to get auth token"""
+    global auth_token
+
+    # Step 1: Register
+    reg_body = {
+        "email": "testbot@example.com",
+        "password": "TestPass123!",
+        "name": "Test Bot"
+    }
+    reg_resp = make_request('POST', '/api/auth/register', body=reg_body)
+
+    # Step 2: Login (register may return token directly, or we need to login)
+    if reg_resp.get('status') in (200, 201) and reg_resp.get('body'):
+        # Try to extract token from register response
+        body = reg_resp['body']
+        token = None
+        if isinstance(body, dict):
+            # Common token locations
+            for key in ('token', 'accessToken', 'access_token', 'jwt'):
+                if key in body:
+                    token = body[key]
+                    break
+            # Nested: { data: { token: "..." } } or { data: { accessToken: "..." } }
+            if not token and 'data' in body and isinstance(body['data'], dict):
+                for key in ('token', 'accessToken', 'access_token'):
+                    if key in body['data']:
+                        token = body['data'][key]
+                        break
+            # Nested: { tokens: { access: { token: "..." } } }
+            if not token and 'tokens' in body and isinstance(body['tokens'], dict):
+                access = body['tokens'].get('access', {})
+                if isinstance(access, dict):
+                    token = access.get('token')
+
+        if token:
+            auth_token = token
+            print(f"  ✓ Auth: Got token from register response")
+            return
+
+    # Step 3: If register didn't return token, try login
+    login_body = {
+        "email": "testbot@example.com",
+        "password": "TestPass123!"
+    }
+    login_resp = make_request('POST', '/api/auth/login', body=login_body)
+
+    if login_resp.get('status') in (200, 201) and login_resp.get('body'):
+        body = login_resp['body']
+        if isinstance(body, dict):
+            for key in ('token', 'accessToken', 'access_token', 'jwt'):
+                if key in body:
+                    auth_token = body[key]
+                    break
+            if not auth_token and 'data' in body and isinstance(body['data'], dict):
+                for key in ('token', 'accessToken', 'access_token'):
+                    if key in body['data']:
+                        auth_token = body['data'][key]
+                        break
+            if not auth_token and 'tokens' in body and isinstance(body['tokens'], dict):
+                access = body['tokens'].get('access', {})
+                if isinstance(access, dict):
+                    auth_token = access.get('token')
+
+    if auth_token:
+        print(f"  ✓ Auth: Got token from login response")
+    else:
+        print(f"  ⚠ Auth: Could not obtain token (register: {reg_resp.get('status')}, login: {login_resp.get('status')})")
+
+def get_auth_headers():
+    """Return auth headers if token is available"""
+    if auth_token:
+        return {'Authorization': f'Bearer {auth_token}'}
+    return {}
+\`\`\`
+
+IMPORTANT AUTH RULES:
+- Call setup_auth() at the START of main(), before any tests
+- Read the source code to find the EXACT field names (some APIs use "username"
+  instead of "email", "firstName"/"lastName" instead of "name", etc.)
+- Read the source code to find the EXACT auth route paths
+- If register fails (409 = user exists), try login directly
+- If both register and login fail, continue tests WITHOUT auth — protected
+  endpoints will return 401/403 which is still a valid test outcome
+- Store token in a global variable, use get_auth_headers() in test functions
+- For tests that specifically test "invalid auth", do NOT use the real token
+- If the API requires email verification after register, check if there's a
+  way to bypass it (e.g., isEmailVerified field in schema, or a verify endpoint).
+  If not, the register may still return a token — try to use it.
+- Some APIs return the token in a Set-Cookie header instead of the body.
+  Check response headers too.
+================================================================================
 
 ABSOLUTE CONSTRAINTS (NON-NEGOTIABLE)
 
@@ -99,7 +231,9 @@ PATCH RULES
 - When a test cannot run (e.g., empty list, no ID found), increment "skipped"
   and print "⚠ SKIPPED" — do NOT increment "failed"
 - POST/PUT/DELETE tests against unknown APIs: accept ANY status code as pass
-  (400, 401, 403, 404, 405, 422, 200, 201 are ALL acceptable outcomes)
+  EXCEPT 404 (wrong path) and 405 (wrong method). Those indicate the endpoint
+  path is incorrect — re-read the source code to find the real route.
+  (400, 401, 403, 422, 200, 201 are ALL acceptable outcomes)
 ================================================================================
 
 PYTHON API TEST TEMPLATE (MANDATORY STRUCTURE)
@@ -304,6 +438,10 @@ def main():
     except Exception as e:
         print(f"⚠ WARNING: Could not connect to server: {str(e)}\\n")
     
+    # Set up authentication (if endpoints require it)
+    # Call setup_auth() here if you defined it — see AUTH FLOW section
+    # setup_auth()
+    
     # Run tests
     test_endpoint_happy_path()
     test_endpoint_not_found()
@@ -336,9 +474,11 @@ TEST TOLERANCE RULES (CRITICAL — AVOID FALSE FAILURES)
   failures. Only increment "failed" for actual assertion failures.
   When skipping, do: skipped += 1 (NOT failed += 1)
 - POST/PUT/DELETE tests: These are write operations on unknown APIs. Accept
-  ANY HTTP status code as a pass: 200, 201, 400, 401, 403, 404, 405, 422.
-  The only failure is a connection error (status 0). This is because we don't
-  know the exact request body schema, auth requirements, or validation rules.
+  MOST HTTP status codes as a pass: 200, 201, 400, 401, 403, 422.
+  The only failures are: connection error (status 0), 404 (endpoint not found),
+  or 405 (method not allowed). A 404 on a write operation means you are using
+  the WRONG PATH — go back and re-read the source code to find the correct route.
+  A 405 means the HTTP method is not supported on that path.
 - Content-Type: Accept any response containing valid JSON, even if Content-Type
   header is missing, text/plain, or text/html. Only fail if body is NOT valid JSON
   AND Content-Type is not json-related.
@@ -356,10 +496,23 @@ TEST TOLERANCE RULES (CRITICAL — AVOID FALSE FAILURES)
 TEST COVERAGE REQUIREMENTS (FOR EACH ENDPOINT)
 - ✅ Happy path (correct request → expected status + valid response body)
 - ✅ Missing/invalid auth (401/403 if endpoint requires auth, 200 if public)
+- ✅ Valid auth (if endpoint requires auth, use token from setup_auth)
 - ✅ Invalid request body (400 Bad Request)
 - ✅ Resource not found (404 or 400 for invalid ID format)
 - ✅ Response shape (body is valid JSON — list or dict)
 - ✅ Single resource by ID (detect ID format from list response first)
+
+CRUD FLOW TESTING (CREATE → UPDATE → DELETE)
+When testing CRUD endpoints, chain them as a flow:
+1. CREATE: POST to create a resource. Extract the ID from the response body
+   (look for id, _id, uuid, slug in the response). If POST returns 404 or 405,
+   the path is WRONG — do NOT continue the flow, SKIP remaining CRUD steps.
+2. UPDATE: PATCH/PUT the created resource using the extracted ID.
+   If no ID was obtained from CREATE, SKIP this step (increment skipped).
+3. DELETE: DELETE the created resource using the extracted ID.
+   If no ID was obtained from CREATE, SKIP this step (increment skipped).
+4. If CREATE returns 401/403, it means auth is required. Try with auth token.
+   If you still can't create, SKIP the UPDATE and DELETE steps.
 
 QUALITY BAR
 - Clear test names that describe what is being verified

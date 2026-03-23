@@ -12,7 +12,7 @@ export class ResultCollector {
 
   constructor() {
     this.failureAnalyzer = new FailureAnalyzer();
-    log.info('ResultCollector initialized');
+    log.debug('ResultCollector initialized');
   }
 
   generateMarkdownReport(results: TestResults, taskKey: string): string {

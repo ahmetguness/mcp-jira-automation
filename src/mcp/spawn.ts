@@ -18,18 +18,17 @@ export interface McpConnection {
 
 /** Connect to mcp-atlassian via SSE (already running externally) */
 export async function connectJiraMcp(config: Config): Promise<McpConnection> {
-    log.info(`Connecting to mcp-atlassian at ${config.mcpAtlassianUrl}`);
     const transport = new SSEClientTransport(new URL(config.mcpAtlassianUrl));
     const client = new Client({ name: "mcp-jira-automation", version: "1.0.0" });
     await client.connect(transport);
-    log.info("Connected to mcp-atlassian ✅");
+    log.info("mcp-atlassian connected ✅");
     return { client, transport, name: "mcp-atlassian" };
 }
 
 /** Spawn SCM MCP server as a child process via stdio */
 export async function connectScmMcp(config: Config): Promise<McpConnection> {
     const { command, args, env, name } = getScmSpawnConfig(config);
-    log.info(`Spawning SCM MCP server: ${name} (${command} ${args.join(" ")})`);
+    log.debug(`Spawning: ${name} (${command} ${args.join(" ")})`);
 
     const transport = new StdioClientTransport({
         command,
@@ -47,28 +46,24 @@ export async function connectScmMcp(config: Config): Promise<McpConnection> {
 
             stderrBuffer += str;
             const lines = stderrBuffer.split("\n");
-
-            // The last item is either an empty string (if it ended with \n) 
-            // or a partial line that we must buffer for the next chunk.
             stderrBuffer = lines.pop() || "";
 
             for (const rawLine of lines) {
                 const line = rawLine.trim();
                 if (!line) continue;
 
-                // Determine if it's an error level or just info based on content, defaulting to debug/info
+                // Only log errors/fatals from MCP server stderr; suppress info-level chatter
                 if (line.toLowerCase().includes("error") || line.toLowerCase().includes("fatal")) {
                     log.error(line, { provider: name });
-                } else {
-                    log.debug(line, { provider: name });
                 }
+                // All other MCP server internal logs are silently dropped
             }
         });
     }
 
     const client = new Client({ name: "mcp-jira-automation", version: "1.0.0" });
     await client.connect(transport);
-    log.info(`Connected to ${name} ✅`);
+    log.info(`${name} connected ✅`);
     return { client, transport, name };
 }
 

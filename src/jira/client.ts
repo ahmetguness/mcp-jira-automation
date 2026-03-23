@@ -22,7 +22,7 @@ export class JiraClient {
     /** Search issues assigned to the AI bot */
     async fetchBotIssues(limit = 20): Promise<JiraIssue[]> {
         const jql = buildBotJql(this.config);
-        log.info(`Fetching bot issues with JQL: ${jql}`);
+        log.debug(`JQL: ${jql}`);
 
         const rawResult = await this.mcp.callJiraTool("jira_search", {
             jql,
@@ -61,7 +61,7 @@ export class JiraClient {
         }
 
         try {
-            log.info("Auto-detecting repository custom field...");
+            log.debug("Auto-detecting repository custom field...");
             
             // Try searching for "repository" first
             let rawResult = await this.mcp.callJiraTool("jira_search_fields", {
@@ -75,12 +75,9 @@ export class JiraClient {
             if (!Array.isArray(fields)) {
                 fields = [];
             }
-            
-            log.info(`Found ${fields.length} fields matching 'repository'`);
 
             // If no results, try "repo" as well
             if (fields.length === 0) {
-                log.info("No fields found for 'repository', trying 'repo'...");
                 rawResult = await this.mcp.callJiraTool("jira_search_fields", {
                     keyword: "repo",
                 });
@@ -92,8 +89,6 @@ export class JiraClient {
                 if (!Array.isArray(fields)) {
                     fields = [];
                 }
-                
-                log.info(`Found ${fields.length} fields matching 'repo'`);
             }
 
             // Search for custom fields with "repository" or "repo" in name
@@ -103,8 +98,6 @@ export class JiraClient {
                 const name = typeof fieldObj.name === 'string' ? fieldObj.name.toLowerCase() : '';
                 const id = typeof fieldObj.id === 'string' ? fieldObj.id : '';
                 const isCustom = typeof fieldObj.custom === 'boolean' ? fieldObj.custom : id.startsWith("customfield_");
-                
-                log.info(`  Field: ${fieldObj.name} (${id}) - custom: ${isCustom}`);
                 
                 return isCustom && (name.includes("repository") || name.includes("repo"));
             });
@@ -116,7 +109,7 @@ export class JiraClient {
                 
                 if (fieldId) {
                     this.cachedRepoFieldId = fieldId;
-                    log.info(`✅ Auto-detected repository field: ${fieldName} (${fieldId})`);
+                    log.info(`Repository field: ${fieldName} (${fieldId})`);
                     return fieldId;
                 }
             }
@@ -140,7 +133,7 @@ export class JiraClient {
         }
 
         if (fieldId) {
-            log.info(`Fetching issue ${issueKey} with custom field ${fieldId}`);
+            log.debug(`Fetching ${issueKey} custom field ${fieldId}`);
             const rawResult = await this.mcp.callJiraTool("jira_get_issue", {
                 issue_key: issueKey,
                 fields: fieldId,
@@ -154,7 +147,7 @@ export class JiraClient {
                 null;
 
             if (value) {
-                log.info(`Found repository in custom field ${fieldId}: ${JSON.stringify(value)}`);
+                log.debug(`Found repository in custom field ${fieldId}: ${JSON.stringify(value)}`);
                 
                 // Handle different value formats from Jira
                 let repoValue: string;
@@ -163,11 +156,11 @@ export class JiraClient {
                 } else if (value && typeof value === "object" && "value" in value) {
                     // Handle Jira select field format: {value: "owner/repo"}
                     repoValue = String((value as { value: unknown }).value);
-                    log.info(`Extracted repository value from Jira select field: ${repoValue}`);
+                    log.debug(`Extracted repository value from Jira select field: ${repoValue}`);
                 } else {
                     // Fallback: stringify the object
                     repoValue = JSON.stringify(value);
-                    log.warn(`Repository field has unexpected format, using stringified value: ${repoValue}`);
+                    log.warn(`Repository field has unexpected format: ${repoValue}`);
                 }
                 
                 return normalizeRepoUrl(repoValue);
@@ -192,7 +185,7 @@ export class JiraClient {
 
     /** Add a comment to an issue */
     async addComment(issueKey: string, body: string): Promise<void> {
-        log.info(`Adding comment to ${issueKey}`);
+        log.debug(`Adding comment to ${issueKey}`);
         await this.mcp.callJiraTool("jira_add_comment", {
             issue_key: issueKey,
             body,

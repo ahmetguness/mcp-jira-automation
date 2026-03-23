@@ -46,7 +46,7 @@ export class JiraListener {
     this.config = config;
     this.pollingInterval = (config.pollingIntervalSeconds ?? 60) * 1000; // Convert to milliseconds
     
-    log.info('JiraListener initialized', {
+    log.debug('JiraListener initialized', {
       baseUrl: config.jiraBaseUrl,
       botUser: config.botUserIdentifier,
       pollingIntervalSeconds: config.pollingIntervalSeconds ?? 60,

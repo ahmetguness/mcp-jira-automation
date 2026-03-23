@@ -100,7 +100,7 @@ export class DockerExecutor {
         this.configImage = config.dockerImage;
         this.timeoutMs = config.execTimeoutMs;
         this.allowInstallScripts = config.allowInstallScripts;
-        log.info(`Docker executor initialized (image: ${this.configImage}, timeout: ${this.timeoutMs}ms)`);
+        log.debug(`Docker executor initialized (image: ${this.configImage}, timeout: ${this.timeoutMs}ms)`);
     }
 
     /** Check if Docker is available */
@@ -400,8 +400,8 @@ export class DockerExecutor {
             const workdirSubpath = mainWorkdir.replace(/^\/workspace\/?/, "");
             if (workdirSubpath) {
                 commands = commands.map(cmd => {
-                    // Replace "python backend/file.py" with "python file.py" when workdir is backend
-                    const pattern = new RegExp(`\\bpython\\s+${workdirSubpath}/`, 'g');
+                    // Replace "python3 backend/file.py" or "python backend/file.py" with "python file.py"
+                    const pattern = new RegExp(`\\bpython3?\\s+${workdirSubpath}/`, 'g');
                     return cmd.replace(pattern, 'python ');
                 });
             }

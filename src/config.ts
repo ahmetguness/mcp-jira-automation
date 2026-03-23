@@ -131,7 +131,7 @@ export function loadConfig(): Config {
     return result.data;
 }
 
-/** Log secret presence (set/unset + length) — values are NEVER logged */
+/** Log secret presence (set/unset) — values are NEVER logged */
 function auditSecrets(config: Config): void {
     const secrets: [string, string | undefined][] = [
         ["JIRA_API_TOKEN", config.jiraApiToken],
@@ -140,13 +140,9 @@ function auditSecrets(config: Config): void {
         ["ANTHROPIC_API_KEY", config.anthropicApiKey],
         ["GEMINI_API_KEY", config.geminiApiKey],
     ];
-    for (const [name, value] of secrets) {
-        if (value) {
-            log.info(`Secret ${name}: SET (len=${value.length})`);
-        } else {
-            log.debug(`Secret ${name}: NOT SET`);
-        }
-    }
+    const set = secrets.filter(([, v]) => v).map(([n]) => n);
+    const unset = secrets.filter(([, v]) => !v).map(([n]) => n);
+    log.info(`Secrets: ${set.join(', ')} ✓${unset.length ? ` | not set: ${unset.join(', ')}` : ''}`);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────

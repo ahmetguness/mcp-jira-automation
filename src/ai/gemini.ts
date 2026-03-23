@@ -19,7 +19,7 @@ export class GeminiProvider implements AiProvider {
         if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is required when AI_PROVIDER=gemini");
         this.genAI = new GoogleGenerativeAI(config.geminiApiKey);
         this.model = config.aiModel ?? "gemini-2.0-flash";
-        log.info(`Gemini provider initialized (model: ${this.model})`);
+        log.debug(`Gemini provider initialized (model: ${this.model})`);
     }
 
     async analyze(context: TaskContext): Promise<AiAnalysis> {

@@ -48,7 +48,7 @@ export class RepositoryResolver {
       ...config,
     };
 
-    log.info('RepositoryResolver initialized', {
+    log.debug('RepositoryResolver initialized', {
       hasDefaultRepo: !!config.defaultRepositoryUrl,
       projectMappingsCount: Object.keys(config.projectMappings ?? {}).length,
       customFieldName: this.config.repositoryCustomFieldName,

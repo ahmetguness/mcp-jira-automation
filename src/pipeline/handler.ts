@@ -321,7 +321,7 @@ export class PipelineHandler {
                     defaultBranch,
                 );
 
-                log.info(`PR created: ${prUrl}`);
+                log.debug(`PR created: ${prUrl}`);
                 return prUrl;
             } catch (prErr: unknown) {
                 const prMsg = String(prErr);

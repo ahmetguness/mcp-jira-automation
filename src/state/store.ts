@@ -103,7 +103,7 @@ export class StateStore {
             nextRetryAt: existing?.nextRetryAt ?? null,
         };
         this.save();
-        log.info(`Locked issue ${issueKey} for processing (attempt ${this.data.issues[issueKey]?.attemptCount})`);
+        log.debug(`Locked ${issueKey} (attempt ${this.data.issues[issueKey]?.attemptCount})`);
         return true;
     }
 
@@ -120,7 +120,7 @@ export class StateStore {
             lockedAt: null, // Release lock
         };
         this.save();
-        log.info(`Updated issue ${issueKey} -> ${status}`);
+        log.debug(`${issueKey} → ${status}`);
     }
 
     /** Mark as success */

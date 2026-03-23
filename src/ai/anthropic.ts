@@ -19,7 +19,7 @@ export class AnthropicProvider implements AiProvider {
         if (!config.anthropicApiKey) throw new Error("ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic");
         this.client = new Anthropic({ apiKey: config.anthropicApiKey });
         this.model = config.aiModel ?? "claude-sonnet-4-20250514";
-        log.info(`Anthropic provider initialized (model: ${this.model})`);
+        log.debug(`Anthropic provider initialized (model: ${this.model})`);
     }
 
     async analyze(context: TaskContext): Promise<AiAnalysis> {

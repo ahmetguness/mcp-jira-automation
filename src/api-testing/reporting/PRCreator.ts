@@ -12,7 +12,7 @@ export class PRCreator {
 
   constructor(scmProvider?: ScmProvider) {
     this.scmProvider = scmProvider;
-    log.info('PRCreator initialized', { hasScmProvider: !!this.scmProvider });
+    log.debug('PRCreator initialized', { hasScmProvider: !!this.scmProvider });
   }
 
   async commitToScm(

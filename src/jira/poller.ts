@@ -44,7 +44,9 @@ export class JiraPoller {
         try {
             log.debug("Polling for new issues...");
             const issues = await this.jiraClient.fetchBotIssues();
-            log.info(`Found ${issues.length} issue(s) in bot queue`);
+            if (issues.length > 0) {
+                log.info(`Found ${issues.length} issue(s) in bot queue`);
+            }
 
             for (const issue of issues) {
                 if (!this.running) break;

@@ -149,7 +149,7 @@ export class ApiTestOrchestrator {
       requireApproval: config.requireApproval ?? false,
     });
 
-    log.info('ApiTestOrchestrator initialized', {
+    log.debug('ApiTestOrchestrator initialized', {
       requireApproval: config.requireApproval ?? false,
       enablePolling: config.enablePolling ?? false,
     });

@@ -14,7 +14,7 @@ export class Executor {
     private docker: DockerExecutor;
     private policy: ExecPolicy;
 
-    constructor(private config: Config) {
+    constructor(config: Config) {
         this.docker = new DockerExecutor(config);
         this.policy = config.execPolicy;
     }

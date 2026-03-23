@@ -68,7 +68,7 @@ export class RepositoryContextBuilder {
       ...config,
     };
 
-    log.info('RepositoryContextBuilder initialized', {
+    log.debug('RepositoryContextBuilder initialized', {
       maxFileSizeBytes: this.config.maxFileSizeBytes,
       maxTotalContextBytes: this.config.maxTotalContextBytes,
     });

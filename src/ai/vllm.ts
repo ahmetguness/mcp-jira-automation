@@ -27,7 +27,7 @@ export class VllmProvider implements AiProvider {
             apiKey: "not-needed", // vLLM doesn't require an API key
         });
         this.model = config.vllmModel;
-        log.info(`vLLM provider initialized (model: ${this.model}, base: ${config.vllmBaseUrl})`);
+        log.debug(`vLLM provider initialized (model: ${this.model}, base: ${config.vllmBaseUrl})`);
     }
 
     async analyze(context: TaskContext): Promise<AiAnalysis> {

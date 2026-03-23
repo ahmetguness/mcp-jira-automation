@@ -26,7 +26,7 @@ export class ReportingManager {
       maxRetryAttempts: config.maxRetryAttempts,
     });
     
-    log.info('ReportingManager initialized');
+    log.debug('ReportingManager initialized');
   }
 
   // Facade methods to act as a drop-in replacement for old TestReporter interface

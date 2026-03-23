@@ -19,7 +19,7 @@ export class JiraReporter {
   constructor(config: JiraReporterConfig) {
     this.config = config;
     this.maxRetryAttempts = config.maxRetryAttempts ?? 3;
-    log.info('JiraReporter initialized');
+    log.debug('JiraReporter initialized');
   }
 
   async reportToJira(taskKey: string, results: TestResults): Promise<void> {

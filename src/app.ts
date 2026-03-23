@@ -10,7 +10,6 @@ import { createAiProvider, type AiProvider } from "./ai/index.js";
 import { PipelineHandler } from "./pipeline/handler.js";
 import { StateStore } from "./state/store.js";
 import { createLogger } from "./logger.js";
-import { Executor } from "./executor/index.js";
 import { ApiTestOrchestrator } from "./api-testing/orchestrator/ApiTestOrchestrator.js";
 
 const log = createLogger("app");
@@ -22,7 +21,6 @@ export class App {
     private ai!: AiProvider;
     private pipeline!: PipelineHandler;
     private apiTestOrchestrator!: ApiTestOrchestrator;
-    private executor!: Executor;
     private state: StateStore;
     private poller: JiraPoller | null = null;
     private webhook: JiraWebhook | null = null;
@@ -36,14 +34,12 @@ export class App {
     async start(): Promise<void> {
 
         // 1. Connect MCP servers
-        log.info("Connecting to MCP servers...");
         await this.mcp.connect();
 
         // 2. Create services
         this.jira = new JiraClient(this.mcp, this.config);
         this.scm = createScmProvider(this.config, this.mcp);
         this.ai = createAiProvider(this.config);
-        this.executor = new Executor(this.config);
         this.pipeline = new PipelineHandler(this.config, this.jira, this.scm, this.ai, this.state);
         
         this.apiTestOrchestrator = new ApiTestOrchestrator({
@@ -66,9 +62,9 @@ export class App {
         });
 
         // 3. Check Docker
-        const dockerReady = await this.executor.isReady();
+        const dockerReady = await this.pipeline.isReady();
         if (!dockerReady) {
-            log.warn("⚠️ Docker is not available. Execution will fail. Please start Docker.");
+            log.warn("Docker is not available — execution will fail");
         }
 
         // 4. Start listener

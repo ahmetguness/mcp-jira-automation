@@ -19,7 +19,7 @@ export class OpenAiProvider implements AiProvider {
         if (!config.openaiApiKey) throw new Error("OPENAI_API_KEY is required when AI_PROVIDER=openai");
         this.client = new OpenAI({ apiKey: config.openaiApiKey });
         this.model = config.aiModel ?? "gpt-4o";
-        log.info(`OpenAI provider initialized (model: ${this.model})`);
+        log.debug(`OpenAI provider initialized (model: ${this.model})`);
     }
 
     async analyze(context: TaskContext): Promise<AiAnalysis> {

@@ -74,17 +74,13 @@ export class McpManager {
 
     /** Initialize all MCP connections */
     async connect(): Promise<void> {
-        log.info("Initializing MCP connections...");
-
         this.jira = await connectJiraMcp(this.config);
-
         const { tools: jiraTools } = await this.jira.client.listTools();
-        log.info(`mcp-atlassian provides ${jiraTools.length} tools`);
 
         this.scm = await connectScmMcp(this.config);
-
         const { tools: scmTools } = await this.scm.client.listTools();
-        log.info(`${this.scm.name} provides ${scmTools.length} tools`);
+
+        log.info(`MCP ready: mcp-atlassian (${jiraTools.length} tools), ${this.scm.name} (${scmTools.length} tools)`);
     }
 
     /** Get Jira MCP client */

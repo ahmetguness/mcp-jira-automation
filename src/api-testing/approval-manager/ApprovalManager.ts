@@ -62,7 +62,7 @@ export class ApprovalManager {
     this.config = config;
     this.requireApproval = config.requireApproval ?? false;
     
-    log.info('ApprovalManager initialized', {
+    log.debug('ApprovalManager initialized', {
       requireApproval: this.requireApproval,
     });
   }
