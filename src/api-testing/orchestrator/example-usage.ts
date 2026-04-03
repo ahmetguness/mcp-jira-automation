@@ -1,3 +1,6 @@
+/* eslint-disable no-console */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Example usage of ApiTestOrchestrator
  * Feature: api-endpoint-testing-transformation
@@ -42,7 +45,7 @@ async function processSingleTask() {
 /**
  * Example 2: Start continuous polling
  */
-async function startContinuousPolling() {
+function startContinuousPolling() {
   const orchestrator = new ApiTestOrchestrator({
     jira: {
       jiraBaseUrl: 'https://your-company.atlassian.net',
@@ -60,7 +63,7 @@ async function startContinuousPolling() {
   });
 
   // Start the orchestrator
-  await orchestrator.start();
+  orchestrator.start();
   
   console.log('🚀 Orchestrator started - polling for tasks...');
   

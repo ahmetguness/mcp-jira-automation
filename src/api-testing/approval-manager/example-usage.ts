@@ -1,3 +1,5 @@
+/* eslint-disable no-console */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * Example usage of ApprovalManager
  * Feature: api-endpoint-testing-transformation

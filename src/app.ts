@@ -3,6 +3,7 @@
  */
 
 import type { Config } from "./config.js";
+import type { JiraIssue } from "./types.js";
 import { McpManager } from "./mcp/manager.js";
 import { JiraClient, JiraPoller, JiraWebhook } from "./jira/index.js";
 import { createScmProvider, type ScmProvider } from "./scm/index.js";
@@ -68,9 +69,10 @@ export class App {
         }
 
         // 4. Start listener
-        const handleIssue = async (issue: any) => {
+        const handleIssue = async (issue: JiraIssue) => {
             // Determine if issue is an API test task. For now, check for a specific label or summary keyword
-            const isApiTest = issue.fields?.labels?.includes("api-test") || 
+            const labels = issue.raw?.labels as string[] | undefined;
+            const isApiTest = labels?.includes("api-test") || 
                               issue.summary?.toLowerCase().includes("api test");
             
             if (isApiTest) {

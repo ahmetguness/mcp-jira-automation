@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Example usage of EndpointParser with error reporting
  * Feature: api-endpoint-testing-transformation
@@ -8,7 +9,7 @@
  */
 
 import { EndpointParser } from './EndpointParser.js';
-import type { JiraTask } from '../models/types.js';
+import type { JiraTask, EndpointSpec } from '../models/types.js';
 
 /**
  * Example: Process a Jira task and report errors if specifications are invalid
@@ -22,7 +23,7 @@ import type { JiraTask } from '../models/types.js';
 export async function processTaskEndpoints(
   task: JiraTask,
   jiraClient: { addComment: (taskKey: string, comment: string) => Promise<void> }
-): Promise<{ success: boolean; endpoints?: any[]; errorComment?: string }> {
+): Promise<{ success: boolean; endpoints?: EndpointSpec[]; errorComment?: string }> {
   const parser = new EndpointParser();
   
   // Parse and validate endpoints

@@ -38,7 +38,7 @@ export class TestStrategyManager {
   public generateTestPlan(
     jiraRequestedEndpoints: EndpointSpec[],
     discoveredSpecs: EndpointSpec[],
-    context: TestContext
+    _context: TestContext
   ): TestPlan {
     log.info(`Generating test plan for ${jiraRequestedEndpoints.length} requested endpoints`);
 

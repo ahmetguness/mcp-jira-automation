@@ -1,258 +1,268 @@
 # MCP Jira Automation
 
-**MCP Jira Automation** is an **autonomous API testing and workflow automation system**. It automatically retrieves API endpoint specifications from Jira tasks, retrieves repository context and API specs using the Model Context Protocol (MCP), formulates a deterministic test strategy, generates comprehensive test scripts using AI models (OpenAI/Anthropic/Gemini/vLLM), executes tests in isolated Docker environments, and reports results back to Jira with pull requests containing the generated tests.
+Jira görevlerinden API endpoint gereksinimlerini otomatik olarak alan, AI ile test kodu üreten, izole Docker ortamlarında çalıştıran ve sonuçları Jira'ya raporlayan otonom bir API test sistemi.
 
-This system transforms abstract API endpoint requirements into production-ready test suites, supporting multiple test frameworks (pytest, Jest, Postman) and intelligently detecting specifications such as OpenAPI, Swagger, and Postman collections directly from the repository.
+Sistem; OpenAPI, Swagger ve Postman koleksiyonlarını doğrudan repodan tespit eder. pytest, Jest ve Postman gibi birden fazla test framework'ünü destekler. AI tarafında OpenAI, Anthropic, Gemini ve vLLM provider'larıyla çalışır.
 
 ---
 
-## 🏗️ Architecture and Working Logic
-
-The system is a mostly autonomous, policy-gated API testing automation platform that integrates directly with issue trackers like Jira. It is designed to interpret API testing requirements, gather deep repository context, formulate deterministic test strategies, and use AI to generate test implementations. These tests are executed securely in an isolated environment, and the results, along with proposed pull requests, are reported back to the engineering team. Optional human approval steps ensure quality, compliance, and security throughout the automation lifecycle.
+## Mimari
 
 ```mermaid
 graph TD
-    A[Jira Task<br/>with Endpoint Specs] -->|1. Analyze Task| B(TaskAnalyzer)
-    B -->|2. Valid Request?| C{Valid?}
-    C -->|No| D[Report Errors to Jira]
-    C -->|Yes| E[EndpointParser]
-    E -->|3. Extract Endpoints| F[RepositoryContextBuilder]
-    F -->|4. Resolve & Retrieve Context| G((SCM Provider<br/>GitHub/GitLab/Bitbucket))
-    F -->|5. Context Files| H(SpecDetector)
-    H -->|6. Parse API Specs| I(TestStrategyManager)
-    I -->|7. Formulate Policy-Driven Plan| J[TestScriptGenerator]
-    J -->|8. Generate Code via AI| K{AI Provider<br/>OpenAI/Anthropic/Gemini/vLLM}
-    K -->|9. Test Implementations| L{Approval Required?}
-    L -->|Yes| M[JiraReporter: Post & Wait]
-    L -->|No| N[TestExecutor]
-    M -->|Approved| N
-    N -->|10. Execute in Ephemeral Docker| O[(Docker Container)]
-    O -->|11. Raw Results| P[ResultCollector & FailureAnalyzer]
-    P -->|12. Processed Results| Q[PRCreator & JiraReporter]
-    Q -->|13. Create PR| G
-    Q -->|14. Update Issue| R[Jira API]
+    A[Jira Görevi] -->|1. Analiz| B(TaskAnalyzer)
+    B -->|2. Geçerli mi?| C{Doğrulama}
+    C -->|Hayır| D[Jira'ya Hata Raporu]
+    C -->|Evet| E[EndpointParser]
+    E -->|3. Endpoint Çıkarımı| F[RepositoryContextBuilder]
+    F -->|4. Repo Bağlamı| G((SCM Provider<br/>GitHub/GitLab/Bitbucket))
+    F -->|5. Dosyalar| H(SpecDetector)
+    H -->|6. API Spec Parse| I(TestStrategyManager)
+    I -->|7. Test Planı| J[TestScriptGenerator]
+    J -->|8. AI ile Kod Üretimi| K{AI Provider<br/>OpenAI/Anthropic/Gemini/vLLM}
+    K -->|9. Test Kodu| L{Onay Gerekli mi?}
+    L -->|Evet| M[Jira'da Onay Bekle]
+    L -->|Hayır| N[TestExecutor]
+    M -->|Onaylandı| N
+    N -->|10. Docker'da Çalıştır| O[(Docker Container)]
+    O -->|11. Sonuçlar| P[ResultCollector & FailureAnalyzer]
+    P -->|12. Analiz| Q[PRCreator & JiraReporter]
+    Q -->|13. PR Oluştur| G
+    Q -->|14. Jira Güncelle| R[Jira API]
 ```
 
-### 1. Task Analysis and Interpretation (TaskAnalyzer)
-The process begins when a Jira task is created or updated. Instead of immediately parsing endpoints from text, the `TaskAnalyzer` (or `IssueInterpreter`) serves as the primary ingress layer.
-- **Reads Jira Task Fields**: Parses the description, custom fields, and labels to understand the overall objective.
-- **Extracts Repository Information**: Identifies which repository, branch, or environment is targeted.
-- **Determines Required Processing**: Evaluates whether explicit endpoint parsing is required based on the task description.
-- **Detects Ambiguity**: Flags missing or ambiguous information (e.g., a missing base URL or incomplete authentication requirements) before proceeding.
-- **Normalizes Task Input**: Standardizes the developer's request into a uniform, structured format for downstream services to consume.
+### İş Akışı
 
-### 2. Endpoint Specification Extraction (EndpointParser)
-Once the task is analyzed and verified as actionable, the `EndpointParser` processes the normalized task input. It extracts the explicitly targeted URLs, HTTP methods (GET, POST, etc.), and expected status codes (e.g., 200, 404), forming a baseline of what the developer explicitly wants tested.
+1. **Görev Analizi (TaskAnalyzer)** — Jira görevindeki açıklama, özel alanlar ve etiketler okunur. Hedef repo, branch ve ortam bilgisi çıkarılır. Eksik veya belirsiz bilgiler (base URL, auth gereksinimleri vb.) işaretlenir.
 
-### 3. Repository Context Retrieval (RepositoryContextBuilder)
-To generate tests that conform to the target project's standards, the system must understand the codebase. Fetching the entire repository is slow and often exceeds AI token limits. Instead, the `RepositoryContextBuilder` selectively and intelligently retrieves files relevant to API behavior and testing patterns:
-- **Route and Controller Files**: To understand how the API maps to underlying business logic.
-- **Validation Schemas**: To identify required payloads, data types, and bounds.
-- **Authentication Middleware**: To understand how endpoints are secured and authorized.
-- **Framework Configuration Files**: (e.g., `package.json`, `requirements.txt`, `pytest.ini`) to determine test runners and dependencies.
-- **Existing Test Files**: (e.g., `tests/api` or `__tests__/api`) to analyze the repository's preferred testing style, coding guidelines, and fixture usage.
-- **API Specifications**: Locating files such as `openapi.yaml`, `swagger.json`, or Postman collections.
+2. **Endpoint Çıkarımı (EndpointParser)** — Görevden URL'ler, HTTP metotları ve beklenen durum kodları çıkarılır.
 
-### 4. Parsing API Technical Specifications (SpecDetector)
-Rather than relying on an AI model to guess API mechanics, the `SpecDetector` deterministically evaluates the API specifications located by the `RepositoryContextBuilder`.
-- **Detects and Parses Specs**: Deterministically parses OpenAPI, Swagger, or Postman files.
-- **Evaluates Reliability**: Checks if the specification is complete, accurate, and up-to-date.
-- **Detects Inconsistencies**: Analyzes and flags discrepancies between the documented specification and the retrieved route/controller code.
-- **Provides Normalized Metadata**: Exposes a structured representation of the API (including required query parameters, JSON schemas for request/response bodies, and authentication schemes).
+3. **Repo Bağlamı (RepositoryContextBuilder)** — Tüm repo yerine sadece ilgili dosyalar seçici şekilde alınır: route/controller dosyaları, validasyon şemaları, auth middleware'leri, framework konfigürasyonları, mevcut testler ve API spesifikasyonları.
 
-### 5. Building the Test Strategy (TestStrategyManager)
-The strategy layer combines the normalized Jira requirements and the parsed API metadata to construct a deterministic, policy-driven `TestPlan`. While AI may assist, it does not replace the deterministic strategy logic. Strict internal policies govern test coverage:
-- **Authentication Tests**: If an endpoint requires authentication, tests asserting `401 Unauthorized` responses must automatically be generated.
-- **Contract Validation**: If an OpenAPI schema is present, response payload contract validation tests are mandated.
-- **Negative Testing**: Edge cases and validation failure tests (e.g., `400 Bad Request` or missing required fields) are strictly enforced.
-- **Permission Tests**: If Role-Based Access Control (RBAC) is detected, the strategy requires tests simulating varying permission boundary checks (e.g., `403 Forbidden`).
+4. **Spec Tespiti (SpecDetector)** — OpenAPI, Swagger veya Postman dosyaları deterministik olarak parse edilir. Spec ile gerçek kod arasındaki tutarsızlıklar tespit edilir.
 
-### 6. Generating Test Code with AI (TestScriptGenerator)
-Given the comprehensive `TestPlan` and repository context, the `TestScriptGenerator` prompts an AI model (such as OpenAI, Gemini, or vLLM) to produce the actual test implementations.
-- **Uses AI to Generate Implementations**: Transforms the test plan into actionable code logic.
-- **Adapts to Test Frameworks**: Emits code utilizing the target repository's preferred framework (e.g., Jest, Pytest, Supertest).
-- **Follows Existing Patterns**: Adheres to the exact coding style, assertion formats, and patterns currently used in the repository.
-- **Integrates with Helpers**: Leverages pre-existing setup routines, teardowns, and fixture factories found in the codebase.
-- **Avoids Hardcoding Secrets**: Ensures environment variables are securely used in place of sensitive tokens.
-- **Validates Output**: Optionally runs linter or syntax checks on the generated scripts to guarantee executable code before proceeding.
+5. **Test Stratejisi (TestStrategyManager)** — Jira gereksinimleri ve API metadata'sı birleştirilerek deterministik bir test planı oluşturulur. Zorunlu kurallar: auth testleri (401), kontrat doğrulama, negatif testler (400), RBAC testleri (403).
 
-### 7. Secure Test Execution (TestExecutor)
-Executing autogenerated code requires strict containment to maintain host safety. The `TestExecutor` manages a highly controlled, ephemeral execution environment.
-- **Ephemeral Containers**: Spins up a single-use, isolated Docker container specifically for the test run.
-- **Dependency Installation**: Dynamically installs required framework packages (e.g., `npm install` or `pip install`) utilizing cached layers for speed.
-- **Network Isolation**: Restricts default network access to prevent unauthorized outbound requests or data leakage.
-- **Resource Limits**: Enforces strict CPU, memory, and disk I/O quotas to prevent system exhaustion.
-- **Execution Timeout**: Applies rigid time limits to execution to prevent infinite loops.
-- **Artifact Collection**: Safely harvests execution logs, request/response dumps, and test output artifacts immediately after the run, destroying the container afterward.
+6. **AI ile Kod Üretimi (TestScriptGenerator)** — Test planı ve repo bağlamı kullanılarak AI modeli ile test kodu üretilir. Hedef framework'e (Jest, pytest, Supertest) uygun, repodaki mevcut kodlama stiline sadık kod çıktısı verilir.
 
-### 8. Reporting and Notification
-Once execution completes, post-processing is strictly decoupled and handled by specialized reporting services.
-- **ResultCollector**: Aggregates the raw test outcomes, coverage metrics, and execution artifacts from the Docker container.
-- **FailureAnalyzer**: Inspects failed tests or execution crashes to provide insights and actionable debugging feedback.
-- **PRCreator**: Automatically pushes the generated test scripts and any necessary configuration updates to a new branch, creating a Pull Request against the target repository.
-- **JiraReporter**: Posts a detailed markdown summary as a comment on the originating Jira task and transitions the Jira issue status, setting up the optional human approval step.
+7. **İzole Çalıştırma (TestExecutor)** — Tek kullanımlık Docker container'ında çalıştırılır. Ağ izolasyonu, kaynak limitleri, zaman aşımı ve artifact toplama uygulanır.
+
+8. **Raporlama** — Sonuçlar Jira'ya yorum olarak eklenir, PR oluşturulur, görev durumu güncellenir.
+
 ---
 
-## 🚀 Installation
+## Proje Yapısı
 
-### Prerequisites
-1. [Node.js](https://nodejs.org/) (v20+)
-2. [Docker](https://www.docker.com/) (Required for isolated test execution)
-3. Python 3 and pip (For Atlassian/Bitbucket MCP servers)
-
-### 0. MCP Atlassian Setup (IMPORTANT!)
-This project leverages the MCP Atlassian server to communicate seamlessly with Jira:
-
-```bash
-# Install MCP Atlassian
-pip install mcp-atlassian
-
-# Copy the environment example
-cp mcp-atlassian.env.example mcp-atlassian.env
-
-# Edit the mcp-atlassian.env file to enter your Jira information
-# Fill in JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN
+```
+src/
+├── ai/                    # AI provider'lar (OpenAI, Anthropic, Gemini, vLLM)
+├── api-testing/           # API test orkestrasyon motoru
+│   ├── orchestrator/      # Ana orkestratör
+│   ├── task-analyzer/     # Jira görev analizi
+│   ├── endpoint-parser/   # Endpoint çıkarımı
+│   ├── context-retrieval/ # Repo bağlam toplama
+│   ├── specification/     # API spec tespiti
+│   ├── strategy/          # Test strateji yönetimi
+│   ├── test-executor/     # Test çalıştırma
+│   ├── test-script-generator/ # AI ile test kodu üretimi
+│   ├── reporting/         # Sonuç raporlama, PR oluşturma
+│   ├── approval-manager/  # Onay iş akışı
+│   └── credential-manager/# Kimlik bilgisi yönetimi
+├── executor/              # Docker container yönetimi ve güvenlik politikaları
+├── jira/                  # Jira client, poller, webhook
+├── mcp/                   # MCP Atlassian bağlantısı
+├── pipeline/              # Pipeline orkestrasyon
+├── scm/                   # SCM provider'lar (GitHub, GitLab, Bitbucket)
+├── state/                 # Durum yönetimi
+└── validation/            # Konfigürasyon doğrulama
 ```
 
-**Note:** The `PORT=9000` value in the `mcp-atlassian.env` file must match `MCP_SSE_URL=http://127.0.0.1:9000/sse` in the main `.env` file.
+---
 
-For detailed setup: [MCP-ATLASSIAN-SETUP.md](MCP-ATLASSIAN-SETUP.md)
+## Gereksinimler
 
-### 1. Jira Setup
-1. Create a user/bot account named (e.g., **"MCP Automation Bot"**) in your Jira environment. The system only processes tasks assigned to this account.
-2. Create a custom field named **"Repository"** (`Short text` format) in Jira's custom fields and add it to screens.
-   - *Enter this field's ID in the `JIRA_REPO_FIELD_ID` in `.env`.*
-   - Alternatively, you can include `Repository: username/repo` anywhere in the task description.
+- [Node.js](https://nodejs.org/) v20+
+- [Docker](https://www.docker.com/) (izole test çalıştırma için)
+- Python 3 + pip (MCP Atlassian sunucusu için)
 
-For detailed guides: [JIRA-REPOSITORY-GUIDE.md](JIRA-REPOSITORY-GUIDE.md)
+---
 
-### 2. SCM Setup
-The system supports multiple SCM providers by parsing identifiers. Supply them in the formatting:
+## Kurulum
+
+### 1. MCP Atlassian Kurulumu
+
+```bash
+pip install mcp-atlassian
+cp mcp-atlassian.env.example mcp-atlassian.env
+```
+
+`mcp-atlassian.env` dosyasını düzenleyerek `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN` değerlerini girin.
+
+`PORT=9000` değeri, `.env` dosyasındaki `MCP_SSE_URL=http://127.0.0.1:9000/sse` ile eşleşmelidir.
+
+Detaylı rehber: [MCP-ATLASSIAN-SETUP.md](MCP-ATLASSIAN-SETUP.md)
+
+### 2. Jira Kurulumu
+
+1. Jira'da bir bot hesabı oluşturun (ör. "AI Cyber Bot"). Sistem sadece bu hesaba atanan görevleri işler.
+2. Jira'da "Repository" adında bir özel alan (Short text) oluşturun ve ekranlara ekleyin.
+   - Alan ID'sini `.env` dosyasındaki `JIRA_REPO_FIELD_ID` değişkenine yazın.
+   - Alternatif olarak görev açıklamasına `Repository: username/repo` yazabilirsiniz.
+
+Detaylı rehber: [JIRA-REPOSITORY-GUIDE.md](JIRA-REPOSITORY-GUIDE.md)
+
+### 3. SCM Kurulumu
+
+Desteklenen formatlar:
 - **GitHub**: `org/repo`
-- **GitLab**: `group/repo` or `group/subgroup/repo`
+- **GitLab**: `group/repo` veya `group/subgroup/repo`
 - **Bitbucket**: `workspace/repo`
 
-*(Providing full URLs like `https://github.com/org/repo` will be parsed securely automatically).*
+Tam URL'ler (`https://github.com/org/repo`) de otomatik olarak parse edilir.
 
-### 3. Configuration (`.env`)
-Clone the repository and set up environment bindings:
+### 4. Konfigürasyon
+
 ```bash
+git clone <repo-url>
+cd mcp-jira-automation
+npm install
 cp .env.example .env
 ```
-Populate `.env` with API keys and preferences (Detailed comments inside the file guide you).
 
-### 4. Running the System
+`.env` dosyasını düzenleyerek API anahtarlarını ve tercihleri girin.
 
-#### Option 1: Automatic Startup (Windows - Recommended)
-The `start-all.bat` script boots both the MCP server and the node application.
-```cmd
-.\scripts\start-all.bat
-```
+---
 
-#### Option 2: Linux/Mac OS
+## Çalıştırma
+
+### CLI Aracı (Önerilen)
+
 ```bash
-chmod +x scripts/*.sh
-./scripts/start-all.sh
+npm run build
+npm link
+
+mja run     # Her şeyi başlat (MCP + Uygulama)
+mja mcp     # Sadece MCP Atlassian
+mja app     # Sadece ana uygulama
+mja help    # Yardım
 ```
 
-#### Option 3: Manual Startup
-Terminal 1 (MCP Atlassian):
+`npm link` kullanmadan:
+
+```bash
+npm run mja        # Her şeyi başlat
+npm run mja:mcp    # Sadece MCP
+npm run mja:app    # Sadece uygulama
+```
+
+### Platform Scriptleri
+
+**Windows:**
+```cmd
+.\scripts\windows\start-all.bat
+```
+
+**Linux/Mac:**
+```bash
+chmod +x scripts/unix/*.sh
+./scripts/unix/start-all.sh
+```
+
+### Manuel Başlatma
+
+Terminal 1 — MCP Atlassian:
 ```bash
 mcp-atlassian --env-file mcp-atlassian.env --transport sse --port 9000 -vv
 ```
 
-Terminal 2 (Main Application):
+Terminal 2 — Ana Uygulama:
 ```bash
-npm install
 npm run build
 npm run start
 ```
 
-#### Option 4: Docker Compose
-Run isolated background services:
+### Docker Compose
+
 ```bash
 docker-compose up -d
 ```
 
+Üç servis başlatır:
+- **mcp-atlassian** — Jira MCP sunucusu (port 9000)
+- **docker-socket-proxy** — Güvenli Docker socket proxy
+- **runner** — Ana uygulama (read-only, kaynak limitli, izole)
+
 ---
 
-## 🧪 Quick Test Workflow
+## Kullanım
 
-### Step 1: Assign a Task
-Create a Jira Task assigned to the bot containing endpoint requirements. **MCP Jira Automation** will augment these requests utilizing the OpenAPI specs located in your repository (if present).
+### 1. Jira Görevi Oluşturun
 
-### Step 2: Jira Description Context
-Provide endpoint requests inside the task using JSON, YAML, or Markdown.
+Bot hesabına atanmış, endpoint gereksinimlerini içeren bir görev oluşturun.
 
-**Markdown Example:**
+**Markdown formatı:**
 ```markdown
-Summary: Test User Automation Features
+Summary: Kullanıcı API Testleri
 
 Description:
-Ensure the user endpoints perform successfully and handle invalid IDs.
+Kullanıcı endpoint'lerinin doğru çalıştığını ve hatalı ID'leri düzgün ele aldığını doğrula.
 
 | Method | URL | Expected Status | Auth Type | Test Scenarios |
 |--------|-----|-----------------|-----------|----------------|
 | GET | /api/users | 200 | Bearer | success, unauthorized |
-| POST | /api/users | 201 | Bearer | success, validation_error, unauthorized |
+| POST | /api/users | 201 | Bearer | success, validation_error |
 | GET | /api/users/{id} | 200 | Bearer | success, not_found |
 
 Repository: org/backend-api
 ```
 
-### Step 3: Monitor Execution
-The Pipeline orchestrator automatically acts on the Jira listener state:
-```text
-INFO - Found 1 issue: PROJ-123
-INFO - Processing issue PROJ-123
-INFO - Parsing endpoint specifications...
-INFO - Found 3 endpoints to test
-INFO - Repository: org/backend-api
-INFO - Retrieving relevant files from repository...
-INFO - SpecDetector: Extracted 20 unique endpoints from 1 specification files
-INFO - TestStrategy: Test plan generated with 3 endpoints and 2 coverage requirements
-INFO - Detected test framework: pytest + requests
-INFO - Generating comprehensive test suite using vLLM...
-INFO - Executing tests in Docker container...
-INFO - Tests passed! (12/12 tests)
-INFO - Creating Pull Request...
-✅ Issue PROJ-123 completed successfully
-```
+### 2. Otomatik İşlem
 
-### Expected Deliverables
-The system reports back with:
-- Extensively detailed test result outputs directly on the Jira task comment threads
-- Updates task workflow states
-- Raises a PR against the `org/backend-api` repo containing the generated scripts (e.g. `tests/api/test_users.py`) for CI/CD ingestion.
+Sistem otomatik olarak:
+1. Jira görevini alır ve analiz eder
+2. Repodan ilgili dosyaları ve API spec'lerini çeker
+3. Deterministik test stratejisi oluşturur
+4. AI ile test kodu üretir
+5. Docker container'ında çalıştırır
+6. Sonuçları Jira'ya raporlar ve PR oluşturur
 
 ---
 
-## ⚙️ Key Technical Configuration
+## Konfigürasyon Referansı
 
-| Variable | Description |
+| Değişken | Açıklama |
 |----------|----------|
-| **Jira Settings** | |
-| `JIRA_BASE_URL` | Your Jira server address, e.g., `https://company.atlassian.net`. |
-| `JIRA_API_TOKEN` | Jira API access token. |
-| `JIRA_REPO_FIELD_ID` | Backend ID of the "Repository" custom field you added. |
-| **SCM Selection** | |
-| `SCM_PROVIDER` | `github`, `gitlab`, or `bitbucket`. |
-| **AI Selection** | |
-| `AI_PROVIDER` | `openai`, `anthropic`, `gemini`, or `vllm`. |
-| **API Testing Engine** | |
-| `REQUIRE_APPROVAL` | Require manual Jira developer approval prior to `TestExecutor` container spin-up. |
-| `TEST_TIMEOUT_SECONDS` | Maximum time allowed for test execution (e.g. `300`). |
+| `JIRA_BASE_URL` | Jira sunucu adresi (`https://company.atlassian.net`) |
+| `JIRA_EMAIL` | Jira hesap e-postası |
+| `JIRA_API_TOKEN` | Jira API erişim token'ı |
+| `JIRA_PROJECT_KEY` | Jira proje anahtarı (ör. `KAN`) |
+| `JIRA_AI_BOT_DISPLAY_NAME` | Bot'un Jira'daki görünen adı |
+| `JIRA_REPO_FIELD_ID` | Repository özel alan ID'si (opsiyonel, otomatik tespit edilir) |
+| `MODE` | Dinleme modu: `poll` veya `webhook` |
+| `POLL_INTERVAL_MS` | Polling aralığı (ms) |
+| `SCM_PROVIDER` | `github`, `gitlab` veya `bitbucket` |
+| `GITHUB_TOKEN` | GitHub erişim token'ı |
+| `AI_PROVIDER` | `openai`, `anthropic`, `gemini` veya `vllm` |
+| `AI_MODEL` | AI model adı (opsiyonel, provider'a göre otomatik) |
+| `EXEC_POLICY` | Çalıştırma politikası: `strict` veya `permissive` |
+| `DOCKER_IMAGE` | Docker imajı: `auto` veya spesifik (ör. `node:20-bookworm`) |
+| `EXEC_TIMEOUT_MS` | Test çalıştırma zaman aşımı (ms) |
+| `REQUIRE_APPROVAL` | Test çalıştırma öncesi Jira onayı (`true`/`false`) |
+| `MCP_SSE_URL` | MCP Atlassian SSE URL'i |
+| `LOG_LEVEL` | Log seviyesi: `debug`, `info`, `warn`, `error` |
+| `MAX_ATTEMPTS` | Başarısız görevler için maksimum deneme sayısı |
 
 ---
 
-## 🔧 Extensibility
+## Genişletilebilirlik
 
-The codebase supports straightforward expansion:
-- **Adding AI Providers**: Add `[provider].ts` logic under `src/ai/` and register mapped interfaces.
-- **Adding Testing Frameworks**: Extend template generation logic inside `TestScriptGenerator.ts`.
-- **Custom Context Parsers**: Expand logic in the `ContextRetrieval` to fetch or interpret broader project graphs or documentation wikis.
+- **AI Provider Ekleme** — `src/ai/` altına yeni provider dosyası ekleyin ve interface'i kaydedin.
+- **Test Framework Ekleme** — `TestScriptGenerator` içindeki şablon üretim mantığını genişletin.
+- **Özel Context Parser** — `ContextRetrieval` modülünü genişleterek farklı proje yapılarını veya dokümantasyon kaynaklarını destekleyin.
+- **SCM Provider Ekleme** — `src/scm/` altına yeni provider ekleyin ve `provider.ts`'deki factory'ye kaydedin.
 
 ---
 
-## 📄 License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+## Lisans
+
+MIT License. Detaylar için [LICENSE](LICENSE) dosyasına bakın.

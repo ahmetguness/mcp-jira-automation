@@ -124,7 +124,7 @@ export function detectModuleSystem(context: TaskContext): "esm" | "commonjs" {
     }
     
     return "commonjs";
-  } catch (error) {
+  } catch {
     // Default to commonjs on parse error
     return "commonjs";
   }

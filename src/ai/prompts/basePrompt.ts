@@ -45,6 +45,7 @@ CRITICAL: BEFORE CREATING TEST CODE
    - For Python: Look for app.py, main.py, server.py, wsgi.py
    - For Go: Look for main.go, server.go
    - For Java: Look for Application.java, Main.java
+   - For PHP: Look for artisan (Laravel), public/index.php, server.php, index.php
 4. UNDERSTAND: Python tests will make HTTP requests to a running server
    - Tests do NOT start the server themselves
    - Tests read the port from SERVER_PORT env var (default: 3001)

@@ -1,4 +1,4 @@
-export type Runtime = "node" | "python" | "go" | "rust" | "java" | "unknown";
+export type Runtime = "node" | "python" | "go" | "rust" | "java" | "php" | "unknown";
 
 export interface RuntimeDetection {
     lang: Runtime;
@@ -23,6 +23,7 @@ const EXTENSION_MAP: Record<string, Runtime> = {
     ".go": "go",
     ".rs": "rust",
     ".java": "java",
+    ".php": "php",
 };
 
 // Map marker files to runtimes
@@ -39,6 +40,9 @@ const MARKER_MAP: Record<string, Runtime> = {
     "Cargo.toml": "rust",
     "pom.xml": "java",
     "build.gradle": "java",
+    "composer.json": "php",
+    "composer.lock": "php",
+    "artisan": "php",
 };
 
 export function determineRuntime(
@@ -115,6 +119,7 @@ export function determineRuntime(
         go: 0,
         rust: 0,
         java: 0,
+        php: 0,
         unknown: 0
     };
 

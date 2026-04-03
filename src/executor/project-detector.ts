@@ -15,7 +15,7 @@ const log = createLogger("detector");
 
 // ─── Types ───────────────────────────────────────────────────
 
-export type ProjectLanguage = "node" | "python" | "go" | "rust" | "java" | "unknown";
+export type ProjectLanguage = "node" | "python" | "go" | "rust" | "java" | "php" | "unknown";
 export type Confidence = "high" | "medium" | "low";
 
 export interface Detection {
@@ -67,6 +67,11 @@ const MARKER_REGISTRY: MarkerRule[] = [
     { file: "pom.xml", language: "java", image: "maven:3.9-eclipse-temurin-21", priority: 40, isLockfile: false, installCmd: ["mvn", "-q", "dependency:resolve"] },
     { file: "gradlew", language: "java", image: "gradle:8-jdk21", priority: 41, isLockfile: false, installCmd: ["./gradlew", "dependencies"] },
     { file: "build.gradle", language: "java", image: "gradle:8-jdk21", priority: 42, isLockfile: false, installCmd: ["gradle", "dependencies"] },
+
+    // PHP — lockfile first
+    { file: "composer.lock", language: "php", image: "php:8.3-cli", priority: 50, isLockfile: true, installCmd: ["composer", "install", "--no-interaction", "--no-progress"] },
+    { file: "composer.json", language: "php", image: "php:8.3-cli", priority: 51, isLockfile: false, installCmd: ["composer", "install", "--no-interaction", "--no-progress"] },
+    { file: "artisan", language: "php", image: "php:8.3-cli", priority: 52, isLockfile: false, installCmd: ["composer", "install", "--no-interaction", "--no-progress"] },
 ];
 
 // ─── AI Hint → Image Mapping ────────────────────────────────
@@ -77,6 +82,7 @@ const HINT_IMAGE_MAP: Record<ProjectLanguage, string> = {
     go: "golang:1.22-bookworm",
     rust: "rust:1.77",
     java: "maven:3.9-eclipse-temurin-21",
+    php: "php:8.3-cli",
     unknown: "ubuntu:24.04",
 };
 
@@ -88,6 +94,7 @@ export const LANGUAGE_ENV: Record<ProjectLanguage, string[]> = {
     go: ["GOPATH=/root/go", "GOCACHE=/tmp/go-cache"],
     rust: ["CARGO_HOME=/root/.cargo"],
     java: ["MAVEN_OPTS=-Dmaven.repo.local=/root/.m2"],
+    php: ["COMPOSER_ALLOW_SUPERUSER=1", "COMPOSER_NO_INTERACTION=1"],
     unknown: [],
 };
 
@@ -242,7 +249,7 @@ function resolveBestInstallCmd(bestRule: MarkerRule, hits: MarkerHit[]): string[
 function parseHint(hint?: string): ProjectLanguage | null {
     if (!hint) return null;
     const normalized = hint.toLowerCase().trim();
-    const valid: ProjectLanguage[] = ["node", "python", "go", "rust", "java", "unknown"];
+    const valid: ProjectLanguage[] = ["node", "python", "go", "rust", "java", "php", "unknown"];
     return valid.includes(normalized as ProjectLanguage) ? (normalized as ProjectLanguage) : null;
 }
 

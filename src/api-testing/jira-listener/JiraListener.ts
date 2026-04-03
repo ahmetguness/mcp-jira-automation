@@ -343,7 +343,7 @@ export class JiraListener {
    * @param signature - The signature from the webhook request header (optional)
    * @returns Parsed JiraTask if the webhook is for a task assignment/update, null otherwise
    */
-  async handleWebhookCallback(payload: string, signature?: string): Promise<JiraTask | null> {
+  handleWebhookCallback(payload: string, signature?: string): JiraTask | null {
     log.debug('Handling webhook callback');
 
     try {

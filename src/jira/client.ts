@@ -27,12 +27,14 @@ export class JiraClient {
         const rawResult = await this.mcp.callJiraTool("jira_search", {
             jql,
             limit,
-            fields: "summary,status,description,issuetype,assignee",
         });
+
+        log.debug(`Raw jira_search response: ${JSON.stringify(rawResult).slice(0, 500)}`);
 
         const result = parseJiraSearchResponse(rawResult);
 
         const issues = result?.issues ?? result?.result?.issues ?? [];
+        log.debug(`Parsed issue count: ${issues.length}`);
         return issues.map((i) => this.parseIssue(i));
     }
 

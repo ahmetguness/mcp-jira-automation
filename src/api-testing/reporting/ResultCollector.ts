@@ -1,4 +1,4 @@
-import type { TestResults, TestCase } from '../models/types.js';
+import type { TestResults } from '../models/types.js';
 import { TestStatus } from '../models/enums.js';
 import { createLogger } from '../../logger.js';
 import * as fs from 'fs/promises';

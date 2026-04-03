@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Example usage of CredentialManager
  * Feature: api-endpoint-testing-transformation

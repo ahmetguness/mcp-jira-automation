@@ -372,6 +372,31 @@ export class DockerExecutor {
                 }
                 log.info("✅ Node.js installed");
             }
+
+            // Phase 4.1.2: For PHP servers running in non-PHP images, install PHP + Composer
+            if (detection.language === "php" && !targetImage.startsWith("php:")) {
+                log.info("📦 Installing PHP + Composer (server needs it)...");
+                const phpInstallScript = [
+                    'command -v php > /dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq php-cli php-mbstring php-xml php-curl php-zip unzip > /dev/null 2>&1)',
+                    'command -v composer > /dev/null 2>&1 || (curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer)',
+                ].join(' && ');
+                const phpInstallResult = await this.execInContainer(
+                    mainContainer,
+                    ["sh", "-c", phpInstallScript],
+                    mainWorkdir,
+                    300_000
+                );
+                allOutput.push(phpInstallResult.output);
+                if (phpInstallResult.exitCode !== 0) {
+                    log.error("PHP/Composer installation failed");
+                    return {
+                        exitCode: phpInstallResult.exitCode,
+                        stdout: allOutput.join("\n").slice(0, 50000),
+                        stderr: "PHP/Composer installation failed",
+                    };
+                }
+                log.info("✅ PHP + Composer installed");
+            }
             
             if (detection.installCmd && detection.installCmd.length > 0) {
                 const installCmd = applyInstallScriptsPolicy(detection.installCmd, this.allowInstallScripts);
@@ -944,6 +969,50 @@ ps aux | grep node | grep -v grep || echo "No node processes"
       fi
     }
 
+    # ─── PHP server detection ───
+    try_php_server() {
+      # Laravel (artisan serve)
+      if [ -f "artisan" ]; then
+        echo "Laravel project detected"
+        ATTEMPTED_METHODS="$ATTEMPTED_METHODS, php: artisan serve"
+        php artisan serve --host=0.0.0.0 --port=$PORT 2>&1 &
+        SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+        sleep 3
+        if kill -0 $SERVER_PID 2>/dev/null; then echo "Laravel started"; exit 0; fi
+      fi
+      # Symfony (symfony server or php -S with public/index.php)
+      if [ -f "bin/console" ] && [ -f "public/index.php" ]; then
+        echo "Symfony project detected"
+        ATTEMPTED_METHODS="$ATTEMPTED_METHODS, php: symfony public/index.php"
+        php -S 0.0.0.0:$PORT -t public 2>&1 &
+        SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+        sleep 3
+        if kill -0 $SERVER_PID 2>/dev/null; then echo "Symfony started"; exit 0; fi
+      fi
+      # Generic PHP with public/index.php or index.php
+      for DOCROOT in public public_html web www .; do
+        if [ -f "$DOCROOT/index.php" ]; then
+          echo "PHP server detected: $DOCROOT/index.php"
+          ATTEMPTED_METHODS="$ATTEMPTED_METHODS, php: $DOCROOT/index.php"
+          php -S 0.0.0.0:$PORT -t "$DOCROOT" 2>&1 &
+          SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+          sleep 3
+          if kill -0 $SERVER_PID 2>/dev/null; then echo "PHP server started"; exit 0; fi
+        fi
+      done
+      # Slim/Lumen/custom with server.php
+      for ENTRY in server.php src/server.php app.php src/app.php; do
+        if [ -f "$ENTRY" ]; then
+          echo "PHP entry point detected: $ENTRY"
+          ATTEMPTED_METHODS="$ATTEMPTED_METHODS, php: $ENTRY"
+          php -S 0.0.0.0:$PORT "$ENTRY" 2>&1 &
+          SERVER_PID=$!; echo $SERVER_PID > /tmp/server.pid
+          sleep 3
+          if kill -0 $SERVER_PID 2>/dev/null; then echo "PHP server started"; exit 0; fi
+        fi
+      done
+    }
+
     # ─── Java server detection ───
     try_java_server() {
       # Spring Boot with Maven
@@ -1061,6 +1130,9 @@ ps aux | grep node | grep -v grep || echo "No node processes"
     fi
     if [ -f "pom.xml" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
       try_java_server
+    fi
+    if [ -f "composer.json" ] || [ -f "artisan" ]; then
+      try_php_server
     fi
     if [ -f "package.json" ]; then
       try_node_server
