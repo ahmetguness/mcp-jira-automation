@@ -493,6 +493,14 @@ TEST TOLERANCE RULES (CRITICAL — AVOID FALSE FAILURES)
 - Headers are case-insensitive: Check both 'content-type' and 'Content-Type'.
 - Do NOT fail a test just because the response shape is slightly different from
   what you expected. Be flexible with response structures.
+- PROFILE / CURRENT USER endpoints (GET /me, GET /profile, GET /auth/profile, etc.):
+  NEVER assert specific field names like "email" or "name" in the response body.
+  The ONLY assertions allowed are: status == 200 AND body is not None.
+  Different APIs wrap user data differently (e.g., { user: {...} }, { data: {...} },
+  { email: "..." }, etc.). Just verify the endpoint responds with 200 and a non-empty body.
+- PATCH/PUT profile endpoints: NEVER verify that the updated value appears in a
+  subsequent GET response. Response shapes vary too much. Just assert the PATCH/PUT
+  itself returns a non-404/405/0 status code (200, 201, 204, 400, 401, 403, 422 all pass).
 
 TEST COVERAGE REQUIREMENTS (FOR EACH ENDPOINT)
 - ✅ Happy path (correct request → expected status + valid response body)

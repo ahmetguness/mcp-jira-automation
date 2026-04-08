@@ -198,6 +198,7 @@ export class PipelineHandler {
                 this.state.markSuccess(issue.key, prUrl ?? undefined);
                 const totalSec = Math.round(pipelineResult.duration_ms / 1000);
                 log.info(`🎉 ${issue.key} done — ${totalSec}s total${prUrl ? ` → ${prUrl}` : ''}`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
+                await this.jira.transitionIssue(issue.key, "Done");
             } else {
                 this.handleFailureState(issue.key, `Exit code: ${execution.exitCode}`);
             }
