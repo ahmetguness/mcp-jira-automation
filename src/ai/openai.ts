@@ -28,7 +28,7 @@ export class OpenAiProvider implements AiProvider {
         const { result, duration_ms } = await withTiming(async () => {
             // gpt-5-mini only supports temperature=1 (default)
             const temperature = this.model.includes('gpt-5') ? 1 : 0.1;
-            
+
             const response = await this.client.chat.completions.create({
                 model: this.model,
                 messages: [
@@ -44,8 +44,9 @@ export class OpenAiProvider implements AiProvider {
 
         log.timed("info", `AI analysis complete for ${context.issue.key}`, duration_ms);
         const analysis = parseAiResponse(result);
-        
+
         // Post-process: Fix router detection issues in test files
         return fixRouterDetection(analysis, context);
     }
 }
+//response api, 

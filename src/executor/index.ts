@@ -13,10 +13,14 @@ const log = createLogger("executor");
 export class Executor {
     private docker: DockerExecutor;
     private policy: ExecPolicy;
+    private executionMode: "remote" | "sandbox";
+    private apiBaseUrl?: string;
 
     constructor(config: Config) {
         this.docker = new DockerExecutor(config);
         this.policy = config.execPolicy;
+        this.executionMode = config.executionMode;
+        this.apiBaseUrl = config.apiBaseUrl;
     }
 
     /** Check if Docker is available */
@@ -35,6 +39,7 @@ export class Executor {
         analysis: AiAnalysis,
         repoUrl: string,
         branch: string,
+        overrides?: { executionMode?: "remote" | "sandbox"; apiBaseUrl?: string; credentials?: Record<string, string> },
     ): Promise<ExecutionResult> {
         log.info(`Executing ${analysis.commands.length} commands (policy: ${this.policy})`);
 
@@ -71,6 +76,9 @@ export class Executor {
                 commands: allowed,
                 patches,
                 environmentHint: analysis.environment,
+                executionMode: overrides?.executionMode ?? this.executionMode,
+                apiBaseUrl: overrides?.apiBaseUrl ?? this.apiBaseUrl,
+                credentials: overrides?.credentials,
             }),
         );
 

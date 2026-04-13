@@ -4,13 +4,17 @@
 
 import type { PipelineResult } from "../types.js";
 
-export function formatJiraReport(result: PipelineResult): string {
+export function formatJiraReport(result: PipelineResult, options?: { apiBaseUrl?: string; baseUrlSource?: string }): string {
     const icon = result.success ? "✅" : "❌";
     const status = result.success ? "SUCCESS" : "FAILED";
 
     let report = `🤖 *AI Cyber Bot Report* ${icon}\n\n`;
     report += `*Status:* ${status}\n`;
-    report += `*Duration:* ${(result.duration_ms / 1000).toFixed(1)}s\n\n`;
+    report += `*Duration:* ${(result.duration_ms / 1000).toFixed(1)}s\n`;
+    if (options?.apiBaseUrl) {
+        report += `*Target:* ${options.apiBaseUrl} (source: ${options.baseUrlSource ?? "unknown"})\n`;
+    }
+    report += `\n`;
 
     // Analysis
     if (result.analysis) {

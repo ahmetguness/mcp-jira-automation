@@ -420,11 +420,16 @@ export class ApiTestOrchestrator {
     log.info('Executing tests...');
 
     // Convert to ExecutionConfig which requires credentials object
-    // You should dynamically build credentials mapping here
+    // Pass API_BASE_URL from app config so tests can target the correct service
+    const credentials: Record<string, string> = {};
+    if (this.config.appConfig.apiBaseUrl) {
+      credentials.API_BASE_URL = this.config.appConfig.apiBaseUrl;
+    }
+
     const executionConfig: ExecutionConfig = {
       ...this.config.execution,
       environment: this.config.execution?.environment ?? Environment.STAGING,
-      credentials: {}, // Need logic to map requiredEnvVars to CredentialManager/Secrets
+      credentials,
       timeoutSeconds: this.config.execution?.timeoutSeconds ?? 300,
       retryCount: this.config.execution?.retryCount ?? 0,
       retryBackoffSeconds: this.config.execution?.retryBackoffSeconds ?? [1, 2, 4],

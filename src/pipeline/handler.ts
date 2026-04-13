@@ -14,7 +14,7 @@ import type { Config } from "../config.js";
 import type { JiraClient } from "../jira/client.js";
 import type { ScmProvider } from "../scm/index.js";
 import type { AiProvider } from "../ai/index.js";
-import type { JiraIssue, PipelineResult, AiAnalysis } from "../types.js";
+import type { JiraIssue, PipelineResult, AiAnalysis, ScmFile } from "../types.js";
 import { Executor } from "../executor/index.js";
 import { StateStore } from "../state/store.js";
 import { buildTaskContext } from "./context.js";
@@ -138,10 +138,57 @@ export class PipelineHandler {
             }
 
             // ── Step 4: Docker Execution ────────────────────────────
+            // Check for per-task overrides
+            const issueExecMode = extractExecutionModeFromDescription(issue.description);
+
+            // Base URL priority: Jira custom field > description > .env > README
+            const issueBaseUrl = await this.jira.getBaseUrlField(issue.key, issue.description);
+
+            // Priority: description override > base_url implies remote > global config
+            let effectiveMode: "remote" | "sandbox";
+            if (issueExecMode) {
+                effectiveMode = issueExecMode;
+            } else if (issueBaseUrl) {
+                effectiveMode = "remote";
+            } else {
+                effectiveMode = this.config.executionMode;
+            }
+
+            // Base URL priority: Jira (custom field or description) > .env > README fallback
+            let effectiveBaseUrl = issueBaseUrl ?? this.config.apiBaseUrl ?? undefined;
+            let baseUrlSource = issueBaseUrl ? "jira" : this.config.apiBaseUrl ? "env" : undefined;
+
+            if (!effectiveBaseUrl && effectiveMode === "remote") {
+                const readmeUrl = extractBaseUrlFromReadme(context.sourceFiles);
+                if (readmeUrl) {
+                    effectiveBaseUrl = readmeUrl;
+                    baseUrlSource = "readme";
+                    log.info(`🔍 API_BASE_URL detected from README: ${readmeUrl}`, { issueKey: issue.key, step: "exec" });
+                }
+            }
+
+            if (effectiveMode === "remote" && effectiveBaseUrl) {
+                log.info(`🌐 Remote mode: testing against ${effectiveBaseUrl} (source: ${baseUrlSource})`, { issueKey: issue.key, step: "exec" });
+            } else if (effectiveMode === "remote" && !effectiveBaseUrl) {
+                log.warn(`🌐 Remote mode but no API_BASE_URL — tests will use localhost fallback. Set API_BASE_URL in .env or add "base_url: https://..." to the Jira description.`, { issueKey: issue.key, step: "exec" });
+            } else if (effectiveMode === "sandbox") {
+                log.info(`📦 Sandbox mode: starting backend in Docker`, { issueKey: issue.key, step: "exec" });
+            }
+
+            // Read credentials from Jira custom field — only needed in remote mode
+            // Sandbox mode handles auth internally (register/login flow)
+            const taskCredentials = effectiveMode === "remote"
+                ? await this.jira.getCredentialsField(issue.key)
+                : {};
+
             log.info(`🐳 Running tests in Docker...`, { issueKey: issue.key, step: "exec" });
             const repoUrl = this.buildCloneUrl(repo);
             const { result: execution, duration_ms: execMs } = await withTiming(() =>
-                this.executor.execute(analysis, repoUrl, context.repo.defaultBranch)
+                this.executor.execute(analysis, repoUrl, context.repo.defaultBranch, {
+                    executionMode: effectiveMode,
+                    apiBaseUrl: effectiveBaseUrl,
+                    credentials: taskCredentials,
+                })
             );
             
             if (execution.success) {
@@ -190,7 +237,10 @@ export class PipelineHandler {
                 duration_ms: Math.round(performance.now() - startTime),
             };
 
-            const report = formatJiraReport(pipelineResult);
+            const report = formatJiraReport(pipelineResult, {
+                apiBaseUrl: effectiveBaseUrl,
+                baseUrlSource: baseUrlSource,
+            });
             await this.jira.addComment(issue.key, report);
 
             // Update state
@@ -198,7 +248,6 @@ export class PipelineHandler {
                 this.state.markSuccess(issue.key, prUrl ?? undefined);
                 const totalSec = Math.round(pipelineResult.duration_ms / 1000);
                 log.info(`🎉 ${issue.key} done — ${totalSec}s total${prUrl ? ` → ${prUrl}` : ''}`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
-                await this.jira.transitionIssue(issue.key, "Done");
             } else {
                 this.handleFailureState(issue.key, `Exit code: ${execution.exitCode}`);
             }
@@ -368,4 +417,104 @@ function slugify(text: string): string {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "")
         .slice(0, 40);
+}
+
+/** Extract execution_mode from Jira issue description for per-task override */
+function extractExecutionModeFromDescription(description: string): "remote" | "sandbox" | undefined {
+    if (!description) return undefined;
+
+    const pattern = /execution[_\s-]?mode\s*[:=]\s*(remote|sandbox)/i;
+    const match = description.match(pattern);
+    if (match?.[1]) {
+        return match[1].toLowerCase() as "remote" | "sandbox";
+    }
+
+    return undefined;
+}
+
+/**
+ * Extract a live API base URL from the repo's README file.
+ * Looks for common patterns like "https://f1api.dev", "https://api.example.com"
+ * but ignores GitHub/GitLab/npm/docs URLs.
+ */
+function extractBaseUrlFromReadme(sourceFiles: ScmFile[]): string | undefined {
+    const readme = sourceFiles.find(f =>
+        f.path.toLowerCase() === "readme.md" || f.path.toLowerCase() === "readme"
+    );
+    if (!readme) return undefined;
+
+    const content = readme.content;
+
+    // Hosts to ignore — these are not API base URLs
+    const ignoredHosts = [
+        "github.com", "gitlab.com", "bitbucket.org",
+        "npmjs.com", "npmjs.org", "npm.im",
+        "shields.io", "badge", "img.shields",
+        "docs.github", "raw.githubusercontent",
+        "twitter.com", "x.com", "linkedin.com",
+        "discord.gg", "discord.com",
+        "youtube.com", "youtu.be",
+        "wikipedia.org",
+        "localhost", "127.0.0.1",
+        "example.com", "example.org",
+        "gofastmcp.com", "fastmcp.cloud",
+        "astral.sh", "pydantic.dev",
+        "errors.pydantic.dev",
+    ];
+
+    // Patterns that indicate an API base URL in README context
+    // e.g. "API URL: https://f1api.dev" or "Base URL: https://api.example.com"
+    // or just a prominent https URL that looks like an API domain
+    const explicitPatterns = [
+        /(?:api[_\s-]?(?:url|base|endpoint)|base[_\s-]?url|live[_\s-]?(?:url|api|demo))\s*[:=]\s*(https:\/\/[^\s\n)>\]"']+)/gi,
+        /(?:available\s+at|hosted\s+at|deployed\s+at|running\s+at|accessible\s+at)\s+(https:\/\/[^\s\n)>\]"']+)/gi,
+    ];
+
+    for (const pattern of explicitPatterns) {
+        let match;
+        while ((match = pattern.exec(content)) !== null) {
+            const url = match[1]?.trim().replace(/\/+$/, "");
+            if (url && !ignoredHosts.some(h => url.includes(h))) {
+                return url;
+            }
+        }
+    }
+
+    // Fallback: look for a prominent domain that appears as a project URL
+    // e.g. "f1api.dev" or "https://f1api.dev" used as the project's own domain
+    const domainPattern = /https:\/\/([a-z0-9-]+\.[a-z]{2,}(?:\.[a-z]{2,})?)\b/gi;
+    const domainCounts = new Map<string, { url: string; count: number }>();
+
+    let domainMatch;
+    while ((domainMatch = domainPattern.exec(content)) !== null) {
+        const fullUrl = domainMatch[0].replace(/\/+$/, "");
+        const host = domainMatch[1]!.toLowerCase();
+        if (ignoredHosts.some(h => host.includes(h) || h.includes(host))) continue;
+        // Skip image/asset URLs
+        if (fullUrl.match(/\.(png|jpg|jpeg|gif|svg|ico|css|js)$/i)) continue;
+
+        const existing = domainCounts.get(host);
+        if (existing) {
+            existing.count++;
+        } else {
+            domainCounts.set(host, { url: fullUrl, count: 1 });
+        }
+    }
+
+    // Pick the most frequently mentioned non-ignored domain
+    if (domainCounts.size > 0) {
+        const sorted = [...domainCounts.entries()].sort((a, b) => b[1].count - a[1].count);
+        const best = sorted[0];
+        if (best && best[1].count >= 2) {
+            // Strip path — return just the base domain
+            try {
+                const parsed = new URL(best[1].url);
+                return `${parsed.protocol}//${parsed.host}`;
+            } catch {
+                return best[1].url;
+            }
+        }
+    }
+
+    return undefined;
 }

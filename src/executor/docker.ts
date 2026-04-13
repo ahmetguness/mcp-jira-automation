@@ -151,6 +151,9 @@ export class DockerExecutor {
         commands: string[];
         patches?: { path: string; content: string }[];
         environmentHint?: string;
+        executionMode?: "remote" | "sandbox";
+        apiBaseUrl?: string;
+        credentials?: Record<string, string>;
     }): Promise<DockerRunResult> {
         // Validate inputs before any Docker interaction
         const safeBranch = validateBranchName(opts.branch);
@@ -303,6 +306,20 @@ export class DockerExecutor {
                 envVars.push('MONGODB_URL=mongodb://localhost:27017/test');
             }
 
+            // Pass API_BASE_URL to container when in remote mode
+            if (opts.executionMode === "remote" && opts.apiBaseUrl) {
+                envVars.push(`API_BASE_URL=${opts.apiBaseUrl}`);
+                log.info(`🌐 Remote mode: tests will target ${opts.apiBaseUrl}`);
+            }
+
+            // Pass task-level credentials from Jira custom field (values are never logged)
+            if (opts.credentials && Object.keys(opts.credentials).length > 0) {
+                for (const [key, value] of Object.entries(opts.credentials)) {
+                    envVars.push(`${key}=${value}`);
+                }
+                log.info(`🔑 Credentials injected: ${Object.keys(opts.credentials).join(', ')} (values redacted)`);
+            }
+
             // NOTE: WorkingDir is NOT set during container creation.
             // On Docker Desktop (Windows/WSL2), setting WorkingDir triggers an
             // lstat syscall on the overlayfs layer that fails with "invalid argument"
@@ -353,7 +370,8 @@ export class DockerExecutor {
             }
 
             // Phase 4.1.1: For Node.js servers running in non-Node images, install Node.js
-            if (detection.language === "node" && !targetImage.startsWith("node:") && !targetImage.startsWith("oven/bun")) {
+            // Only needed in sandbox mode — remote mode doesn't start the server
+            if (opts.executionMode !== "remote" && detection.language === "node" && !targetImage.startsWith("node:") && !targetImage.startsWith("oven/bun")) {
                 log.info("📦 Installing Node.js (server needs it)...");
                 const nodeInstallResult = await this.execInContainer(
                     mainContainer,
@@ -374,7 +392,8 @@ export class DockerExecutor {
             }
 
             // Phase 4.1.2: For PHP servers running in non-PHP images, install PHP + Composer
-            if (detection.language === "php" && !targetImage.startsWith("php:")) {
+            // Only needed in sandbox mode — remote mode doesn't start the server
+            if (opts.executionMode !== "remote" && detection.language === "php" && !targetImage.startsWith("php:")) {
                 log.info("📦 Installing PHP + Composer (server needs it)...");
                 const phpInstallScript = [
                     'command -v php > /dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq php-cli php-mbstring php-xml php-curl php-zip unzip > /dev/null 2>&1)',
@@ -399,6 +418,10 @@ export class DockerExecutor {
             }
             
             if (detection.installCmd && detection.installCmd.length > 0) {
+                // In remote mode, skip server dependency installation — only Python is needed for tests
+                if (opts.executionMode === "remote") {
+                    log.info(`⏭️ Skipping dependency installation (remote mode — tests target external API)`);
+                } else {
                 const installCmd = applyInstallScriptsPolicy(detection.installCmd, this.allowInstallScripts);
                 log.info(`📦 Installing dependencies: ${installCmd.join(" ")}`);
 
@@ -436,6 +459,7 @@ export class DockerExecutor {
                 } else {
                     log.info("✅ Dependencies installed");
                 }
+                }
             }
 
             // Phase 4.2: Patch adjustment for Python tests
@@ -461,14 +485,16 @@ export class DockerExecutor {
             }
 
             // Phase 4.2.4: Start database services if detected
-            if (detectedDatabases.length > 0) {
+            if (detectedDatabases.length > 0 && opts.executionMode !== "remote") {
                 log.info(`🗄️ Starting database services: ${detectedDatabases.join(', ')}...`);
                 await this.startDatabaseServices(mainContainer, detectedDatabases, mainWorkdir);
+            } else if (detectedDatabases.length > 0 && opts.executionMode === "remote") {
+                log.info(`⏭️ Skipping database services (remote mode — using external API)`);
             }
 
             // Phase 4.2.5: Start server if needed (for API tests)
             let serverPort = 3001; // default
-            if (this.shouldStartServer(commands, detection.language)) {
+            if (this.shouldStartServer(commands, detection.language, opts.executionMode)) {
                 log.info(`🚀 Starting server...`);
                 const detected = await this.startServerInContainer(mainContainer, mainWorkdir);
                 if (detected > 0) {
@@ -496,7 +522,7 @@ export class DockerExecutor {
             
             for (const cmd of commands) {
                 // If server was started, verify it's still running before executing test
-                if (this.shouldStartServer(commands, detection.language)) {
+                if (this.shouldStartServer(commands, detection.language, opts.executionMode)) {
                     let serverReady = false;
                     for (let attempt = 0; attempt < 10; attempt++) {
                         const serverCheck = await this.execInContainer(
@@ -551,7 +577,11 @@ ps aux | grep node | grep -v grep || echo "No node processes"
                 if (serverPort !== 3001) {
                     finalCmd = cmd.replace(/localhost:3001/g, `localhost:${serverPort}`);
                 }
-                finalCmd = `SERVER_PORT=${serverPort} ${finalCmd}`;
+
+                // Only inject SERVER_PORT in sandbox mode — remote mode uses API_BASE_URL
+                if (opts.executionMode !== "remote") {
+                    finalCmd = `SERVER_PORT=${serverPort} ${finalCmd}`;
+                }
 
                 log.info(`▶ ${finalCmd}`);
 
@@ -868,10 +898,16 @@ ps aux | grep node | grep -v grep || echo "No node processes"
     }
 
     /**
-     * Determine if server startup is needed based on commands and language
+     * Determine if server startup is needed based on execution mode and commands.
+     * In "remote" mode, tests target an external API_BASE_URL — no server startup.
+     * In "sandbox" mode, the backend is started inside the container.
      */
-    private shouldStartServer(commands: string[], _language: string): boolean {
-        // Enable server startup for Python tests (they make HTTP requests to localhost)
+    private shouldStartServer(commands: string[], _language: string, executionMode?: "remote" | "sandbox"): boolean {
+        // Remote mode: never start server — tests hit an external URL
+        if (executionMode === "remote") {
+            return false;
+        }
+        // Sandbox mode (or legacy default): start server for Python tests
         return commands.some(cmd => cmd.includes('python') && cmd.includes('.py'));
     }
 

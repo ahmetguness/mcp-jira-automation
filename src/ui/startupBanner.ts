@@ -17,6 +17,10 @@ export function printStartupBanner(config: Config): void {
 
     const title = chalk.white.bold("MCP Jira Automation") + chalk.gray(" — AI Cyber Bot");
 
+    const execModeLabel = config.executionMode === "remote"
+        ? `${config.executionMode}${config.apiBaseUrl ? ` → ${config.apiBaseUrl}` : ""}`
+        : config.executionMode;
+
     const lines = [
         "",
         `${chalk.cyan.bold("SCM Provider:")}   ${chalk.white(config.scmProvider)}`,
@@ -24,6 +28,7 @@ export function printStartupBanner(config: Config): void {
         `${chalk.blue.bold("Mode:")}           ${chalk.white(config.mode)}`,
         `${chalk.yellow.bold("Policy:")}         ${chalk.white(config.execPolicy)}`,
         `${chalk.green.bold("Approval:")}       ${chalk.white(config.requireApproval ? "Required" : "Auto-run")}`,
+        `${chalk.red.bold("Execution:")}      ${chalk.white(execModeLabel)}`,
         "",
         `${chalk.gray("Note:")} Set the Repository custom field on a Jira`,
         `      issue or in its description to begin processing.`,

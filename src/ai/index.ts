@@ -8,6 +8,7 @@ import { OpenAiProvider } from "./openai.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { GeminiProvider } from "./gemini.js";
 import { VllmProvider } from "./vllm.js";
+import { AiderProvider } from "./aider.js";
 
 export function createAiProvider(config: Config): AiProvider {
     switch (config.aiProvider) {
@@ -19,6 +20,8 @@ export function createAiProvider(config: Config): AiProvider {
             return new GeminiProvider(config);
         case "vllm":
             return new VllmProvider(config);
+        case "aider":
+            return new AiderProvider(config);
         default:
             throw new Error(`Unsupported AI Provider: ${String(config.aiProvider)}`);
     }

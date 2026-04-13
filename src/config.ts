@@ -13,6 +13,8 @@ const configSchema = z.object({
     jiraProjectKey: z.string().min(1, "JIRA_PROJECT_KEY is required"),
     jiraBotDisplayName: z.string().default("AI Cyber Bot"),
     jiraRepoFieldId: z.string().optional(),
+    jiraCredentialsFieldId: z.string().optional(),
+    jiraBaseUrlFieldId: z.string().optional(),
     jqlOverride: z.string().optional(),
 
     // Listener
@@ -33,13 +35,21 @@ const configSchema = z.object({
     bitbucketWorkspace: z.string().optional(),
 
     // AI
-    aiProvider: z.enum(["openai", "anthropic", "gemini", "vllm"]),
+    aiProvider: z.enum(["openai", "anthropic", "gemini", "vllm", "aider"]),
     aiModel: z.string().optional(),
     openaiApiKey: z.string().optional(),
     anthropicApiKey: z.string().optional(),
     geminiApiKey: z.string().optional(),
     vllmBaseUrl: z.string().optional(),
     vllmModel: z.string().optional(),
+
+    // Aider
+    aiderModel: z.string().optional(),
+    aiderPath: z.string().default("aider"),
+
+    // Execution Mode
+    executionMode: z.enum(["remote", "sandbox"]).default("remote"),
+    apiBaseUrl: z.string().optional(),
 
     // Executor
     execPolicy: z.enum(["strict", "permissive"]).default("strict"),
@@ -74,6 +84,8 @@ export function loadConfig(): Config {
         jiraProjectKey: process.env.JIRA_PROJECT_KEY ?? "",
         jiraBotDisplayName: process.env.JIRA_AI_BOT_DISPLAY_NAME ?? "AI Cyber Bot",
         jiraRepoFieldId: process.env.JIRA_REPO_FIELD_ID || undefined,
+        jiraCredentialsFieldId: process.env.JIRA_CREDENTIALS_FIELD_ID || undefined,
+        jiraBaseUrlFieldId: process.env.JIRA_BASE_URL_FIELD_ID || undefined,
         jqlOverride: process.env.JQL_ASSIGNED_TO_BOT || undefined,
 
         // Listener
@@ -98,6 +110,14 @@ export function loadConfig(): Config {
         geminiApiKey: process.env.GEMINI_API_KEY || undefined,
         vllmBaseUrl: process.env.VLLM_BASE_URL || undefined,
         vllmModel: process.env.VLLM_MODEL || undefined,
+
+        // Aider
+        aiderModel: process.env.AIDER_MODEL || undefined,
+        aiderPath: process.env.AIDER_PATH ?? "aider",
+
+        // Execution Mode
+        executionMode: process.env.EXECUTION_MODE ?? "remote",
+        apiBaseUrl: process.env.API_BASE_URL || undefined,
 
         // Executor
         execPolicy: process.env.EXEC_POLICY ?? "strict",
@@ -128,6 +148,12 @@ export function loadConfig(): Config {
     }
 
     auditSecrets(result.data);
+
+    // Warn if remote mode is active but no API_BASE_URL is configured
+    if (result.data.executionMode === "remote" && !result.data.apiBaseUrl) {
+        log.warn("EXECUTION_MODE=remote but API_BASE_URL is not set. Tests will fail unless base_url is provided in the Jira task description.");
+    }
+
     return result.data;
 }
 

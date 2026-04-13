@@ -60,19 +60,19 @@ CRITICAL: BEFORE CREATING TEST CODE
    before testing those endpoints. See AUTH FLOW section below.
 
 SERVER STARTUP (IMPORTANT!)
-Python tests do NOT start the server. The test execution system will automatically
-start the server before running your tests. Your Python test should:
+Python tests do NOT start the server. Your Python test should:
+  - Read base URL from environment: BASE_URL = os.environ.get("API_BASE_URL", f"http://localhost:{SERVER_PORT}")
+  - If API_BASE_URL is set, tests target that external URL directly (remote mode)
+  - If API_BASE_URL is NOT set, the execution system starts the server locally (sandbox mode)
   - Read port from environment: port = os.environ.get("SERVER_PORT", "3001")
-  - Connect to http://localhost:{port}
   - Handle connection errors gracefully
   - Print clear error messages if server is not responding
 
-The test execution system will:
-  1. Install server dependencies (npm ci, pip install, etc.)
-  2. Start the server and auto-detect which port it listens on
-  3. Set SERVER_PORT env var to the detected port
-  4. Run your Python test
-  5. Clean up after tests complete
+The test execution system operates in two modes:
+  REMOTE mode (default): API_BASE_URL is set → tests hit the external service directly.
+    No server startup, no dependency installation for the target app.
+  SANDBOX mode: API_BASE_URL is NOT set → the system clones the repo, installs deps,
+    starts the server in Docker, auto-detects the port, and runs tests against it.
 
 AUTHENTICATION FLOW (FOR PROTECTED ENDPOINTS)
 ================================================================================
@@ -256,7 +256,7 @@ from urllib.parse import urlparse
 
 # Configuration — port is auto-detected by the execution system
 SERVER_PORT = os.environ.get("SERVER_PORT", "3001")
-BASE_URL = f"http://localhost:{SERVER_PORT}"
+BASE_URL = os.environ.get("API_BASE_URL", f"http://localhost:{SERVER_PORT}")
 TIMEOUT = 10  # seconds
 passed = 0
 failed = 0
@@ -271,12 +271,25 @@ def make_request(method, path, body=None, headers=None):
     if body is not None and 'Content-Type' not in headers:
         headers['Content-Type'] = 'application/json'
     
+    # Store request info for reporting
+    request_info = {
+        'method': method,
+        'url': BASE_URL + path,
+        'headers': {k: v for k, v in headers.items()},
+        'body': body
+    }
+    
     # Parse URL
     url = urlparse(BASE_URL + path)
     
     try:
-        # Create connection
-        conn = http.client.HTTPConnection(url.netloc, timeout=TIMEOUT)
+        # Create connection (HTTPS or HTTP based on scheme)
+        if url.scheme == 'https':
+            import ssl
+            context = ssl.create_default_context()
+            conn = http.client.HTTPSConnection(url.netloc, timeout=TIMEOUT, context=context)
+        else:
+            conn = http.client.HTTPConnection(url.netloc, timeout=TIMEOUT)
         
         # Prepare body
         body_data = json.dumps(body) if body is not None else None
@@ -304,15 +317,38 @@ def make_request(method, path, body=None, headers=None):
         return {
             'status': response.status,
             'body': response_body,
-            'headers': norm_headers
+            'headers': norm_headers,
+            'request': request_info
         }
     except Exception as e:
         return {
             'status': 0,
             'body': None,
             'headers': {},
-            'error': str(e)
+            'error': str(e),
+            'request': request_info
         }
+
+def truncate(obj, max_len=500):
+    """Truncate a JSON-serializable object's string representation for display"""
+    s = json.dumps(obj, ensure_ascii=False, default=str) if not isinstance(obj, str) else obj
+    return s[:max_len] + '...' if len(s) > max_len else s
+
+def print_req_res(response):
+    """Print request and response details for the test report"""
+    req = response.get('request', {})
+    print(f"    ── Request ──")
+    print(f"    {req.get('method', '?')} {req.get('url', '?')}")
+    if req.get('headers'):
+        # Redact Authorization header values
+        safe_headers = {k: ('[REDACTED]' if k.lower() == 'authorization' else v) for k, v in req['headers'].items()}
+        print(f"    Headers: {json.dumps(safe_headers, ensure_ascii=False)}")
+    if req.get('body'):
+        print(f"    Body: {truncate(req['body'])}")
+    print(f"    ── Response ──")
+    print(f"    Status: {response.get('status', '?')}")
+    if response.get('body') is not None:
+        print(f"    Body: {truncate(response['body'])}")
 
 def test_endpoint_happy_path():
     """Test: [ENDPOINT] - Happy path"""
@@ -322,6 +358,7 @@ def test_endpoint_happy_path():
     
     try:
         response = make_request('GET', '/api/endpoint')
+        print_req_res(response)
         
         # Check if request failed
         if 'error' in response:
@@ -365,7 +402,7 @@ def test_endpoint_not_found():
     
     try:
         response = make_request('GET', '/api/endpoint/nonexistent-id-12345')
-        
+        print_req_res(response)
         # Check if request failed
         if 'error' in response:
             print(f"  ✗ FAILED: {response['error']}")
@@ -402,6 +439,7 @@ def test_endpoint_invalid_auth():
     try:
         response = make_request('GET', '/api/endpoint', 
                               headers={'Authorization': 'Bearer invalid-token-12345'})
+        print_req_res(response)
         
         # Check if request failed
         if 'error' in response:
@@ -467,6 +505,7 @@ IMPORTANT NOTES:
 - Use descriptive test names
 - Always handle connection errors gracefully
 - Print clear pass/fail messages
+- ALWAYS use os.environ.get("API_BASE_URL", f"http://localhost:{SERVER_PORT}") for the base URL
 - ALWAYS use os.environ.get("SERVER_PORT", "3001") for the port — NEVER hardcode 3001
 
 TEST TOLERANCE RULES (CRITICAL — AVOID FALSE FAILURES)
@@ -532,6 +571,24 @@ QUALITY BAR
 - Exit with code 0 if failed == 0 (skipped tests are OK), exit 1 if failed > 0
 - NEVER exit 1 just because a test was skipped
 
+REQUEST/RESPONSE LOGGING (MANDATORY)
+================================================================================
+Every test MUST print the request and response details using the print_req_res()
+helper defined in the template. Call it IMMEDIATELY after make_request() returns,
+BEFORE any assertions. This ensures the test report includes full req/res context.
+
+Pattern:
+  response = make_request('GET', '/api/endpoint')
+  print_req_res(response)   # <-- ALWAYS call this right after make_request
+  # ... then do assertions ...
+
+The print_req_res() helper is already defined in the template. It prints:
+  - Request: method, URL, headers (Authorization values redacted), body
+  - Response: status code, body (truncated to 500 chars)
+
+This is critical for debugging failed tests and for the test report.
+================================================================================
+
 FILE UPLOAD TESTING (multipart/form-data)
 ================================================================================
 Some endpoints accept file uploads via multipart/form-data. Use Python stdlib
@@ -582,7 +639,12 @@ def make_multipart_request(method, path, fields=None, files=None, headers=None):
     
     # Use http.client directly
     url = urlparse(BASE_URL + path)
-    conn = http.client.HTTPConnection(url.netloc, timeout=TIMEOUT)
+    if url.scheme == 'https':
+        import ssl
+        context = ssl.create_default_context()
+        conn = http.client.HTTPSConnection(url.netloc, timeout=TIMEOUT, context=context)
+    else:
+        conn = http.client.HTTPConnection(url.netloc, timeout=TIMEOUT)
     conn.request(method, url.path, body=body_bytes, headers=headers)
     response = conn.getresponse()
     data = response.read().decode('utf-8')
