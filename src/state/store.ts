@@ -3,8 +3,8 @@
  * Provides idempotency (skip already-processed issues) and locking.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { IssueState, IssueStatus } from "../types.js";
 import { createLogger } from "../logger.js";
 
@@ -41,7 +41,10 @@ export class StateStore {
         if (!existsSync(dir)) {
             mkdirSync(dir, { recursive: true });
         }
-        writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), "utf-8");
+        // Atomic write: write to temp file, then rename
+        const tmpPath = this.filePath + ".tmp";
+        writeFileSync(tmpPath, JSON.stringify(this.data, null, 2), "utf-8");
+        renameSync(tmpPath, this.filePath);
     }
 
     /** Get state for an issue, or null if never processed */

@@ -183,13 +183,27 @@ export class PipelineHandler {
 
             log.info(`🐳 Running tests in Docker...`, { issueKey: issue.key, step: "exec" });
             const repoUrl = this.buildCloneUrl(repo);
-            const { result: execution, duration_ms: execMs } = await withTiming(() =>
+            let { result: execution, duration_ms: execMs } = await withTiming(() =>
                 this.executor.execute(analysis, repoUrl, context.repo.defaultBranch, {
                     executionMode: effectiveMode,
                     apiBaseUrl: effectiveBaseUrl,
                     credentials: taskCredentials,
                 })
             );
+
+            // Test-level retry: if tests failed due to network issues, retry once
+            if (!execution.success && isNetworkError(execution.stdout + execution.stderr)) {
+                log.info(`🔄 Network error detected, retrying tests...`, { issueKey: issue.key, step: "exec" });
+                const retry = await withTiming(() =>
+                    this.executor.execute(analysis, repoUrl, context.repo.defaultBranch, {
+                        executionMode: effectiveMode,
+                        apiBaseUrl: effectiveBaseUrl,
+                        credentials: taskCredentials,
+                    })
+                );
+                execution = retry.result;
+                execMs += retry.duration_ms;
+            }
             
             if (execution.success) {
                 log.timed("info", `✅ Tests passed (${(execMs / 1000).toFixed(1)}s)`, execMs, {
@@ -517,4 +531,19 @@ function extractBaseUrlFromReadme(sourceFiles: ScmFile[]): string | undefined {
     }
 
     return undefined;
+}
+
+/** Check if test output contains network-related errors worth retrying */
+function isNetworkError(output: string): boolean {
+    const lower = output.toLowerCase();
+    return (
+        lower.includes("connection refused") ||
+        lower.includes("econnrefused") ||
+        lower.includes("econnreset") ||
+        lower.includes("etimedout") ||
+        lower.includes("enotfound") ||
+        lower.includes("name or service not known") ||
+        lower.includes("network is unreachable") ||
+        lower.includes("socket.gaierror")
+    );
 }

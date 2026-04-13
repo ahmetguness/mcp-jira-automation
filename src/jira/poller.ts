@@ -14,6 +14,8 @@ export type IssueHandler = (issue: JiraIssue) => Promise<void>;
 export class JiraPoller {
     private running = false;
     private timer: ReturnType<typeof setTimeout> | null = null;
+    private consecutiveFailures = 0;
+    private readonly maxBackoffMs = 5 * 60 * 1000; // 5 minutes max
 
     constructor(
         private jiraClient: JiraClient,
@@ -38,6 +40,16 @@ export class JiraPoller {
         log.info("Polling stopped");
     }
 
+    /** Calculate next poll delay with exponential backoff on failures */
+    private getNextDelay(): number {
+        if (this.consecutiveFailures === 0) return this.config.pollIntervalMs;
+        const backoff = Math.min(
+            this.config.pollIntervalMs * Math.pow(2, this.consecutiveFailures),
+            this.maxBackoffMs,
+        );
+        return backoff;
+    }
+
     private async poll(handler: IssueHandler): Promise<void> {
         if (!this.running) return;
 
@@ -48,6 +60,12 @@ export class JiraPoller {
                 log.info(`Found ${issues.length} issue(s) in bot queue`);
             }
 
+            // Reset backoff on success
+            if (this.consecutiveFailures > 0) {
+                log.info(`Jira connection restored after ${this.consecutiveFailures} failure(s)`);
+            }
+            this.consecutiveFailures = 0;
+
             for (const issue of issues) {
                 if (!this.running) break;
                 try {
@@ -57,11 +75,14 @@ export class JiraPoller {
                 }
             }
         } catch (e) {
-            log.error(`Jira poll failed: ${String(e)}`);
+            this.consecutiveFailures++;
+            const nextDelay = this.getNextDelay();
+            log.error(`Jira poll failed (${this.consecutiveFailures} consecutive): ${String(e)}. Next retry in ${Math.round(nextDelay / 1000)}s`);
         }
 
         if (this.running) {
-            this.timer = setTimeout(() => void this.poll(handler), this.config.pollIntervalMs);
+            const delay = this.getNextDelay();
+            this.timer = setTimeout(() => void this.poll(handler), delay);
         }
     }
 }

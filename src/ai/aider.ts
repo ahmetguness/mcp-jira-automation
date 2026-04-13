@@ -65,33 +65,25 @@ export class AiderProvider implements AiProvider {
      */
     private async runAider(context: TaskContext): Promise<AiAnalysis> {
         const workDir = await mkdtemp(path.join(tmpdir(), "aider-"));
+        const testFileName = `test-api-${context.issue.key.toLowerCase()}.py`;
 
         try {
             // ── 1. Seed workspace with source & test files ──────────
-            await this.seedWorkspace(workDir, context);
+            await this.seedWorkspace(workDir, context, testFileName);
 
-            // ── 2. Initialize git repo (aider needs it for repo-map) ─
-            await execFileAsync("git", ["init"], { cwd: workDir });
-            await execFileAsync("git", ["add", "."], { cwd: workDir });
-            await execFileAsync("git", [
-                "-c", "user.name=aider-bot",
-                "-c", "user.email=bot@aider.local",
-                "commit", "-m", "initial",
-            ], { cwd: workDir });
-
-            // ── 3. Build prompt file (aider-specific, compact) ─────
+            // ── 2. Build prompt file (aider-specific, compact) ─────
             const fullPrompt = this.buildAiderPrompt(context);
 
             const promptFile = path.join(workDir, ".aider-prompt.md");
             await writeFile(promptFile, fullPrompt, "utf-8");
 
-            // ── 4. Build aider CLI args ─────────────────────────────
-            const args = this.buildArgs(promptFile, context);
+            // ── 3. Build aider CLI args ─────────────────────────────
+            const args = this.buildArgs(promptFile, context, testFileName);
 
-            // ── 5. Build env vars for aider ─────────────────────────
+            // ── 4. Build env vars for aider ─────────────────────────
             const env = this.buildEnv();
 
-            // ── 6. Run aider ────────────────────────────────────────
+            // ── 5. Run aider ────────────────────────────────────────
             log.info(`Running aider (model: ${this.model})...`);
             log.debug(`aider args: ${args.join(" ")}`);
 
@@ -117,20 +109,25 @@ export class AiderProvider implements AiProvider {
 
             log.debug(`Aider stdout (${stdout.length} chars), stderr (${stderr.length} chars)`);
 
-            // ── 7. Collect generated/modified files ─────────────────
+            // ── 6. Collect generated/modified files ─────────────────
             let patches = await this.collectPatches(workDir, context);
 
-            // ── 7b. Fallback: if aider didn't write files (timeout/error),
+            // ── 6b. Fallback: if aider didn't write files (timeout/error),
             //        parse the code from stdout ──────────────────────
-            if (patches.length === 0 || (patches.length === 1 && patches[0]!.content.trim() === "# API Test Suite")) {
-                log.info("Aider didn't write files to disk — extracting code from stdout");
+            const hasRealPyFile = patches.some(p =>
+                p.path.endsWith(".py") && p.content.trim() !== "# API Test Suite"
+            );
+            if (!hasRealPyFile) {
+                log.info("Aider didn't write usable .py files to disk — extracting code from stdout");
                 const extracted = this.extractCodeFromStdout(stdout);
                 if (extracted) {
-                    patches = [{ path: "test-api.py", content: extracted, action: "create" }];
+                    // Remove placeholder patch if present
+                    patches = patches.filter(p => p.content.trim() !== "# API Test Suite");
+                    patches.push({ path: testFileName, content: extracted, action: "create" });
                 }
             }
 
-            // ── 8. Determine run commands ───────────────────────────
+            // ── 7. Determine run commands ───────────────────────────
             const commands = this.inferCommands(patches);
 
             return {
@@ -147,7 +144,7 @@ export class AiderProvider implements AiProvider {
     }
 
     /** Write only the files aider will actually use into the temp workspace */
-    private async seedWorkspace(workDir: string, context: TaskContext): Promise<void> {
+    private async seedWorkspace(workDir: string, context: TaskContext, testFileName: string): Promise<void> {
         const { sources, tests } = this.selectRelevantFiles(context);
         const allFiles = [...sources, ...tests];
 
@@ -158,11 +155,11 @@ export class AiderProvider implements AiProvider {
             await writeFile(filePath, file.content, "utf-8");
         }
 
-        // Create empty test-api.py so aider can edit it (diff format needs existing file)
-        const testApiPath = path.join(workDir, "test-api.py");
+        // Create empty test file so aider can edit it
+        const testApiPath = path.join(workDir, testFileName);
         await writeFile(testApiPath, "# API Test Suite\n", "utf-8");
 
-        log.debug(`Seeded workspace with ${allFiles.length + 1} files (${sources.length} source + ${tests.length} test + test-api.py)`);
+        log.debug(`Seeded workspace with ${allFiles.length + 1} files (${sources.length} source + ${tests.length} test + ${testFileName})`);
     }
 
     /** Select only workdir-relevant files, with limits */
@@ -205,6 +202,7 @@ export class AiderProvider implements AiProvider {
      * aider already sees them via --read and positional args.
      */
     private buildAiderPrompt(context: TaskContext): string {
+        const testFileName = `test-api-${context.issue.key.toLowerCase()}.py`;
         let prompt = `# Task: ${context.issue.key} — ${context.issue.summary}\n\n`;
 
         if (context.issue.description) {
@@ -216,7 +214,7 @@ export class AiderProvider implements AiProvider {
         }
 
         prompt += `## Instructions
-You are an API test engineer. Generate test-api.py using ONLY Python stdlib (http.client, json, os, sys, urllib.parse). No external libraries.
+You are an API test engineer. Generate ${testFileName} using ONLY Python stdlib (http.client, json, os, sys, urllib.parse). No external libraries.
 
 CRITICAL — READ SOURCE CODE FIRST:
 - Read app.ts/server.ts to find route prefixes (app.use('/api', router))
@@ -233,7 +231,13 @@ AUTHENTICATION FLOW (CRITICAL — database starts EMPTY):
 6. Store token globally, use Authorization: Bearer <token> for protected endpoints
 7. Implement setup_auth() that runs ONCE before all tests
 
-TEST TOLERANCE RULES:
+TEST COVERAGE RULES — MANDATORY, NO EXCEPTIONS:
+For EVERY endpoint in the Jira description, you MUST write exactly 3 test functions:
+  1. test_ENDPOINT_happy_path — correct request, expect 200
+  2. test_ENDPOINT_not_found — append /nonexistent-xyz-123 to path, expect 404 or 400
+  3. test_ENDPOINT_invalid_auth — send header Authorization: Bearer invalid-token-12345, expect 200/401/403
+If there are 4 endpoints, you MUST write exactly 12 test functions. Count them.
+DO NOT skip not_found tests for any endpoint. Every endpoint gets all 3 tests.
 - POST/PUT/DELETE: accept 200, 201, 400, 401, 403, 422 as PASS. Only FAIL on 404 (wrong path) or 405 (wrong method)
 - Skipped tests do NOT count as failures. Only increment "failed" for actual assertion failures
 - Content-Type: accept any response with valid JSON, even if header says text/plain
@@ -242,6 +246,22 @@ TEST TOLERANCE RULES:
 EXIT CODE RULES:
 - sys.exit(0) if failed == 0 (even if some tests skipped)
 - sys.exit(1) ONLY if failed > 0
+
+CRUD FLOW TESTING (for POST/PUT/PATCH/DELETE endpoints):
+- Chain as a flow: CREATE → UPDATE → DELETE
+- Extract ID from CREATE response (look for id, _id, uuid, slug)
+- If CREATE returns 404/405, the path is WRONG — skip remaining CRUD steps
+- If no ID obtained, SKIP update/delete (increment skipped, not failed)
+
+QUERY PARAMETER TESTING:
+- Include query params directly in the path: make_request('GET', '/api/cars?brand=Toyota&page=1')
+- URL-encode special characters using urllib.parse.quote
+
+SINGLE RESOURCE BY ID:
+- First call the list endpoint to get a real ID
+- Use that ID for GET /resource/{id} tests
+- If no items exist, SKIP the test (increment skipped, not failed)
+- Detect ID format from list response (id, _id, uuid, slug)
 
 `;
 
@@ -304,10 +324,24 @@ def print_req_res(method, path, response):
 
 def setup_auth():
     global auth_token
-    # Step 1: Register (read exact fields from source code)
-    reg = make_request("POST", "/api/auth/register", body={
+    # IMPORTANT: The paths and field names below are EXAMPLES.
+    # You MUST read the source code (app.ts, routes/, auth/) to find:
+    #   - The EXACT register endpoint path (e.g., /api/auth/register, /api/users/signup)
+    #   - The EXACT login endpoint path (e.g., /api/auth/login, /api/users/signin)
+    #   - The EXACT required fields (e.g., email/username, password, name/firstName)
+    # Replace the paths and fields below with what you find in the source code.
+    
+    REGISTER_PATH = "/api/auth/register"  # <-- CHANGE THIS based on source code
+    LOGIN_PATH = "/api/auth/login"        # <-- CHANGE THIS based on source code
+    REGISTER_BODY = {                     # <-- CHANGE FIELDS based on source code
         "email": "testbot@example.com", "password": "TestPass123!", "name": "Test Bot"
-    })
+    }
+    LOGIN_BODY = {                        # <-- CHANGE FIELDS based on source code
+        "email": "testbot@example.com", "password": "TestPass123!"
+    }
+    
+    # Step 1: Register
+    reg = make_request("POST", REGISTER_PATH, body=REGISTER_BODY)
     # Try to extract token from register response
     if reg.get("status") in (200, 201) and reg.get("body"):
         b = reg["body"]
@@ -320,9 +354,7 @@ def setup_auth():
                     auth_token = b["data"][k]
                     return
     # Step 2: Login
-    login = make_request("POST", "/api/auth/login", body={
-        "email": "testbot@example.com", "password": "TestPass123!"
-    })
+    login = make_request("POST", LOGIN_PATH, body=LOGIN_BODY)
     if login.get("status") in (200, 201) and login.get("body"):
         b = login["body"]
         if isinstance(b, dict):
@@ -336,21 +368,22 @@ def setup_auth():
 \`\`\`\n\n`;
 
         prompt += `Use setup_auth(), get_auth_headers(), and print_req_res() in your tests. Call print_req_res() right after every make_request(). Adapt the register/login field names and paths based on what you see in the source code.\n`;
-        prompt += `Write the complete test-api.py file now. Do not ask questions.\n`;
+        prompt += `Write SEPARATE test functions for each scenario (happy path, not found, invalid auth). Do NOT use a generic test_endpoint() wrapper — write explicit test functions like test_drivers_happy_path(), test_drivers_not_found(), test_drivers_invalid_auth().\n`;
+        prompt += `Write the complete ${testFileName} file now. Do not ask questions.\n`;
 
         return prompt;
     }
 
     /** Build aider CLI arguments */
-    private buildArgs(promptFile: string, context: TaskContext): string[] {
+    private buildArgs(promptFile: string, context: TaskContext, testFileName: string): string[] {
         const args: string[] = [
             "--message-file", promptFile,
             "--yes-always",             // auto-accept all changes
-            "--no-auto-commits",        // we handle commits ourselves
             "--no-stream",              // non-interactive
             "--no-pretty",              // plain output for parsing
             "--no-detect-urls",         // don't scrape URLs found in prompts
-            "--edit-format", "whole",   // write complete files (not diffs)
+            "--no-git",                 // skip git — we track changes ourselves via collectPatches
+            "--edit-format", "diff",    // diff format = fewer tokens than whole
             "--model", this.model,
         ];
 
@@ -364,8 +397,8 @@ def setup_auth():
             args.push(f.path);
         }
 
-        // Add test-api.py as the main editable output file
-        args.push("test-api.py");
+        // Add test file as the main editable output file
+        args.push(testFileName);
 
         log.debug(`Aider context: ${sources.length} source (read-only) + ${tests.length + 1} test (editable) files`);
 

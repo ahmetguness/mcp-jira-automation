@@ -11,7 +11,6 @@ import { createAiProvider, type AiProvider } from "./ai/index.js";
 import { PipelineHandler } from "./pipeline/handler.js";
 import { StateStore } from "./state/store.js";
 import { createLogger } from "./logger.js";
-import { ApiTestOrchestrator } from "./api-testing/orchestrator/ApiTestOrchestrator.js";
 
 const log = createLogger("app");
 
@@ -21,7 +20,6 @@ export class App {
     private scm!: ScmProvider;
     private ai!: AiProvider;
     private pipeline!: PipelineHandler;
-    private apiTestOrchestrator!: ApiTestOrchestrator;
     private state: StateStore;
     private poller: JiraPoller | null = null;
     private webhook: JiraWebhook | null = null;
@@ -42,25 +40,6 @@ export class App {
         this.scm = createScmProvider(this.config, this.mcp);
         this.ai = createAiProvider(this.config);
         this.pipeline = new PipelineHandler(this.config, this.jira, this.scm, this.ai, this.state);
-        
-        this.apiTestOrchestrator = new ApiTestOrchestrator({
-            appConfig: this.config,
-            jira: {
-                jiraBaseUrl: this.config.jiraBaseUrl,
-                jiraEmail: this.config.jiraEmail,
-                jiraApiToken: this.config.jiraApiToken,
-                botUserIdentifier: this.config.jiraBotDisplayName,
-            },
-            repository: {
-                // If possible, these would be loaded from env or config. Using defaults for now.
-                defaultBranch: "main",
-                scmAuthToken: this.config.githubToken || this.config.gitlabToken || this.config.bitbucketAppPassword,
-            },
-            execution: {
-                timeoutSeconds: this.config.execTimeoutMs / 1000,
-            },
-            requireApproval: this.config.requireApproval,
-        });
 
         // 3. Check Docker
         const dockerReady = await this.pipeline.isReady();
@@ -70,18 +49,8 @@ export class App {
 
         // 4. Start listener
         const handleIssue = async (issue: JiraIssue) => {
-            // Determine if issue is an API test task. For now, check for a specific label or summary keyword
-            const labels = issue.raw?.labels as string[] | undefined;
-            const isApiTest = labels?.includes("api-test") || 
-                              issue.summary?.toLowerCase().includes("api test");
-            
-            if (isApiTest) {
-                log.info(`Routing issue ${issue.key} to ApiTestOrchestrator`);
-                await this.apiTestOrchestrator.processTaskByKey(issue.key);
-            } else {
-                log.info(`Routing issue ${issue.key} to PipelineHandler`);
-                await this.pipeline.handle(issue);
-            }
+            log.info(`Routing issue ${issue.key} to PipelineHandler`);
+            await this.pipeline.handle(issue);
         };
 
         if (this.config.mode === "webhook") {

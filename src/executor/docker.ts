@@ -104,14 +104,21 @@ export class DockerExecutor {
     }
 
     /** Check if Docker is available */
+    /** Check if Docker is available, with retry on transient failures */
     async checkConnection(): Promise<boolean> {
-        try {
-            await this.docker.ping();
-            return true;
-        } catch {
-            log.error("Docker is not running or not accessible");
-            return false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                await this.docker.ping();
+                return true;
+            } catch {
+                if (attempt < 3) {
+                    log.warn(`Docker ping failed (attempt ${attempt}/3), retrying in ${attempt}s...`);
+                    await new Promise(r => setTimeout(r, attempt * 1000));
+                }
+            }
         }
+        log.error("Docker is not running or not accessible after 3 attempts");
+        return false;
     }
 
     /** Pull image if not found locally */
@@ -317,7 +324,7 @@ export class DockerExecutor {
                 for (const [key, value] of Object.entries(opts.credentials)) {
                     envVars.push(`${key}=${value}`);
                 }
-                log.info(`🔑 Credentials injected: ${Object.keys(opts.credentials).join(', ')} (values redacted)`);
+                log.info(`🔑 Credentials injected: ${Object.keys(opts.credentials).length} variable(s) (keys and values redacted)`);
             }
 
             // NOTE: WorkingDir is NOT set during container creation.

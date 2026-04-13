@@ -84,6 +84,21 @@ export class Executor {
 
         log.timed("info", `Execution complete (exit: ${result.exitCode})`, duration_ms);
 
+        // Detect OOM kill (Docker sends SIGKILL = exit 137)
+        if (result.exitCode === 137) {
+            log.error("Container was killed by OOM (exit 137). Consider increasing Docker memory limits or reducing test scope.");
+            return {
+                success: false,
+                exitCode: 137,
+                stdout: result.stdout,
+                stderr: result.stderr + "\n\n⚠️ Container killed: Out of Memory (OOM). The test or server exceeded the Docker memory limit.",
+                duration_ms,
+                commands: allowed,
+                blocked,
+                patches: result.patches,
+            };
+        }
+
         return {
             success: result.exitCode === 0,
             exitCode: result.exitCode,

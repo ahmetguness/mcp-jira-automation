@@ -193,7 +193,7 @@ function detectWorkdirFromFiles(allFiles: string[]): { workdir: string; workdirR
     return { workdir: "/workspace" };
 }
 
-/** Read files with size limiting and progress logging */
+/** Read files with size limiting, parallel batches, and progress logging */
 async function readFilesLimited(
     scm: ScmProvider,
     repo: string,
@@ -203,18 +203,30 @@ async function readFilesLimited(
 ): Promise<ScmFile[]> {
     const files: ScmFile[] = [];
     const total = paths.length;
-    for (let i = 0; i < total; i++) {
-        const p = paths[i]!;
-        if (onProgress) onProgress(i + 1, total, p);
-        try {
-            let content = await scm.readFile(repo, p, branch);
-            if (content.length > MAX_FILE_SIZE_CHARS) {
-                content = content.slice(0, MAX_FILE_SIZE_CHARS) + "\n\n... [truncated]";
+    const BATCH_SIZE = 5;
+
+    for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
+        const batch = paths.slice(batchStart, batchStart + BATCH_SIZE);
+
+        const results = await Promise.allSettled(
+            batch.map(async (p, i) => {
+                const globalIndex = batchStart + i;
+                if (onProgress) onProgress(globalIndex + 1, total, p);
+                let content = await scm.readFile(repo, p, branch);
+                if (content.length > MAX_FILE_SIZE_CHARS) {
+                    content = content.slice(0, MAX_FILE_SIZE_CHARS) + "\n\n... [truncated]";
+                }
+                return { path: p, content } as ScmFile;
+            })
+        );
+
+        for (const result of results) {
+            if (result.status === "fulfilled") {
+                files.push(result.value);
             }
-            files.push({ path: p, content });
-        } catch {
-            // Skip files that can't be read
+            // Skip files that can't be read (rejected promises)
         }
     }
+
     return files;
 }

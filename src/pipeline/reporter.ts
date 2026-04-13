@@ -48,6 +48,18 @@ export function formatJiraReport(result: PipelineResult, options?: { apiBaseUrl?
 
         report += `\n`;
 
+        // Parse test results into table format
+        const testLines = parseTestResultsFromOutput(result.execution.stdout);
+        if (testLines.length > 0) {
+            report += `*Test Results:*\n`;
+            report += `||Test||Status||Details||\n`;
+            for (const t of testLines) {
+                const statusIcon = t.passed ? "(/)" : "(x)";
+                report += `|${t.name}|${statusIcon} ${t.passed ? "PASSED" : "FAILED"}|${t.detail}|\n`;
+            }
+            report += `\n`;
+        }
+
         // Truncated output
         if (result.execution.stdout) {
             const output = result.execution.stdout.slice(0, 3000);
@@ -74,4 +86,45 @@ export function formatJiraReport(result: PipelineResult, options?: { apiBaseUrl?
     }
 
     return report;
+}
+
+
+/** Parse test results from Python test output into structured rows */
+function parseTestResultsFromOutput(stdout: string): Array<{ name: string; passed: boolean; detail: string }> {
+    if (!stdout) return [];
+
+    const results: Array<{ name: string; passed: boolean; detail: string }> = [];
+    const lines = stdout.split("\n");
+
+    let currentTest = "";
+    let currentStatus = "";
+
+    for (const line of lines) {
+        // Detect test name: [TEST] test_name or [TEST] GET /api/endpoint
+        const testMatch = line.match(/\[TEST\]\s+(.+)/);
+        if (testMatch) {
+            currentTest = testMatch[1]!.trim();
+            currentStatus = "";
+            continue;
+        }
+
+        // Detect status line
+        if (currentTest) {
+            if (line.includes("PASSED") || line.includes("✓") || line.includes("✅")) {
+                const detail = line.replace(/.*(?:PASSED|✓|✅)\s*/, "").trim();
+                results.push({ name: currentTest, passed: true, detail: detail || "OK" });
+                currentTest = "";
+            } else if (line.includes("FAILED") || line.includes("✗") || line.includes("❌")) {
+                const detail = line.replace(/.*(?:FAILED|✗|❌)\s*/, "").trim();
+                results.push({ name: currentTest, passed: false, detail: detail || "Failed" });
+                currentTest = "";
+            } else if (line.includes("SKIPPED") || line.includes("⚠")) {
+                const detail = line.replace(/.*(?:SKIPPED|⚠)\s*/, "").trim();
+                results.push({ name: currentTest, passed: true, detail: detail || "Skipped" });
+                currentTest = "";
+            }
+        }
+    }
+
+    return results;
 }

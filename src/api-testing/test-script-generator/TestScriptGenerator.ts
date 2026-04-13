@@ -35,9 +35,9 @@ export class TestScriptGenerator {
   private aiProvider: AiProvider;
   private config: Config;
 
-  constructor(config: Config) {
+  constructor(config: Config, aiProvider?: AiProvider) {
     this.config = config;
-    this.aiProvider = createAiProvider(config);
+    this.aiProvider = aiProvider ?? createAiProvider(config);
   }
 
   /**

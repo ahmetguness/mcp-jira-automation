@@ -3,6 +3,10 @@
  * Feature: api-endpoint-testing-transformation
  * Requirements: All requirements (integration)
  * 
+ * @deprecated This orchestrator is not actively used. All issue processing
+ * goes through PipelineHandler in src/pipeline/handler.ts. This module is
+ * kept for reference and potential future use with structured endpoint specs.
+ * 
  * This module connects all components together in a pipeline:
  * Jira → Parse → Resolve → Retrieve → Generate → Execute → Report
  */
@@ -95,14 +99,7 @@ export enum PipelineStage {
 /**
  * ApiTestOrchestrator - Main pipeline orchestrator
  * 
- * Coordinates the entire API testing workflow:
- * 1. Listen for Jira tasks (using JiraListener)
- * 2. Parse endpoints (using EndpointParser)
- * 3. Resolve repository (using RepositoryResolver)
- * 4. Retrieve context (using ContextRetrieval - placeholder)
- * 5. Generate tests (using TestScriptGenerator - placeholder)
- * 6. Execute tests (using TestExecutor - placeholder)
- * 7. Report results (using TestReporter - placeholder)
+ * @deprecated Use PipelineHandler instead. This class is kept for reference.
  */
 export class ApiTestOrchestrator {
   private config: OrchestratorConfig;
