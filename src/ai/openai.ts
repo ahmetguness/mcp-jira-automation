@@ -49,4 +49,3 @@ export class OpenAiProvider implements AiProvider {
         return fixRouterDetection(analysis, context);
     }
 }
-//response api, 

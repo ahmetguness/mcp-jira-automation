@@ -58,22 +58,16 @@ graph TD
 ```
 src/
 ├── ai/                    # AI provider'lar (OpenAI, Anthropic, Gemini, vLLM, Aider)
-├── api-testing/           # API test orkestrasyon motoru
-│   ├── orchestrator/      # Ana orkestratör
-│   ├── task-analyzer/     # Jira görev analizi
-│   ├── endpoint-parser/   # Endpoint çıkarımı
-│   ├── context-retrieval/ # Repo bağlam toplama
-│   ├── specification/     # API spec tespiti
-│   ├── strategy/          # Test strateji yönetimi
-│   ├── test-executor/     # Test çalıştırma
-│   ├── test-script-generator/ # AI ile test kodu üretimi
-│   ├── reporting/         # Sonuç raporlama, PR oluşturma
-│   ├── approval-manager/  # Onay iş akışı
-│   └── credential-manager/# Kimlik bilgisi yönetimi
 ├── executor/              # Docker container yönetimi ve güvenlik politikaları
+│   ├── docker.ts          # Container orchestration (clone, build, run)
+│   ├── database-manager.ts# Veritabanı tespiti ve başlatma (PostgreSQL, MongoDB, MySQL, Redis)
+│   ├── server-lifecycle.ts# Sunucu başlatma ve port tespiti
+│   ├── container-env.ts   # Container ortam değişkenleri
+│   ├── policy.ts          # Komut güvenlik politikaları
+│   └── project-detector.ts# Dil ve proje tipi tespiti
 ├── jira/                  # Jira client, poller, webhook
 ├── mcp/                   # MCP Atlassian bağlantısı
-├── pipeline/              # Pipeline orkestrasyon
+├── pipeline/              # Ana pipeline orkestrasyon (handler → context → AI → Docker → PR → Jira)
 ├── scm/                   # SCM provider'lar (GitHub, GitLab, Bitbucket)
 ├── state/                 # Durum yönetimi
 └── validation/            # Konfigürasyon doğrulama

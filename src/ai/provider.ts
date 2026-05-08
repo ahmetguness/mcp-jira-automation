@@ -5,6 +5,7 @@
 import type { TaskContext, AiAnalysis } from "../types.js";
 import { getBasePrompt } from "./prompts/basePrompt.js";
 import { getOverlayPrompt } from "./prompts/overlays.js";
+import { createLogger } from "../logger.js";
 
 export interface AiProvider {
   /** Analyze a task and generate patches + commands */
@@ -228,10 +229,14 @@ export function parseAiResponse(text: string): AiAnalysis {
       commands: Array.isArray(parsed.commands) ? parsed.commands : [],
       environment: typeof parsed.environment === "string" ? parsed.environment : undefined,
     };
-  } catch {
-    // If JSON parsing fails, return the raw text as summary
+  } catch (e) {
+    // Log the failure explicitly — this is not expected and should be investigated
+    const log = createLogger("ai:provider");
+    log.warn(`AI response JSON parse failed: ${e instanceof Error ? e.message : String(e)}. Response (first 500 chars): ${text.slice(0, 500)}`);
+
+    // Return a result that signals the failure clearly
     return {
-      summary: text,
+      summary: `[AI PARSE ERROR] Could not parse AI response as JSON. Raw response: ${text.slice(0, 200)}`,
       plan: "",
       patches: [],
       commands: [],

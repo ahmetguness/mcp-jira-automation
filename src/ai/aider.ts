@@ -575,30 +575,68 @@ def setup_auth():
         return null;
     }
 
-    /** Clean aider stdout for Jira reporting — remove noise, keep useful info */
+    /** Clean aider stdout for Jira/PR reporting — remove all noise, keep only meaningful text */
     private cleanStdout(stdout: string): string {
         const lines = stdout.split(/\r?\n/);
         const useful: string[] = [];
+        let inCodeBlock = false;
 
         for (const line of lines) {
-            // Skip aider boilerplate
-            if (line.includes("Can't initialize prompt toolkit")) continue;
-            if (line.includes("skip this check with")) continue;
-            if (line.includes(".gitignore")) continue;
-            if (line.startsWith("Aider v")) continue;
-            if (line.startsWith("Main model:")) continue;
-            if (line.startsWith("Weak model:")) continue;
-            if (line.startsWith("Git repo:")) continue;
-            if (line.startsWith("Repo-map:")) continue;
-            if (line.startsWith("Added ")) continue;
-            if (line.startsWith("```")) continue;
-            if (line.startsWith("@@")) continue;
-            if (line.startsWith("+") || line.startsWith("-")) continue;
-            if (line.trim() === "") continue;
+            // Track code blocks to skip entire diff/code sections
+            if (line.startsWith("```")) {
+                inCodeBlock = !inCodeBlock;
+                continue;
+            }
+            if (inCodeBlock) continue;
+
+            const trimmed = line.trim();
+
+            // Skip empty lines
+            if (trimmed === "") continue;
+
+            // Skip aider boilerplate & session info
+            if (trimmed.includes("Can't initialize prompt toolkit")) continue;
+            if (trimmed.includes("skip this check with")) continue;
+            if (trimmed.includes(".gitignore")) continue;
+            if (trimmed.startsWith("Aider v")) continue;
+            if (trimmed.startsWith("Main model:")) continue;
+            if (trimmed.startsWith("Weak model:")) continue;
+            if (trimmed.startsWith("Git repo:")) continue;
+            if (trimmed.startsWith("Repo-map:")) continue;
+            if (trimmed.startsWith("Added ")) continue;
+
+            // Skip token/cost lines: "Tokens: 4.9k sent, 1.8k received. Cost: $0.03..."
+            if (/^Tokens:\s/.test(trimmed)) continue;
+            // Skip "Applied edit to ..." lines
+            if (/^Applied edit to\s/.test(trimmed)) continue;
+            // Skip bare command lines that look like "python test-api.py"
+            if (/^python\s+[\w./-]+\.py$/.test(trimmed)) continue;
+            // Skip "cmd.exe?" prompt artifacts
+            if (trimmed.includes("cmd.exe?")) continue;
+
+            // Skip diff markers
+            if (trimmed.startsWith("@@")) continue;
+            if (/^[+-][^+-]/.test(trimmed)) continue;
+            if (trimmed.startsWith("<<<<<<") || trimmed.startsWith("======") || trimmed.startsWith(">>>>>>")) continue;
+            if (trimmed === "SEARCH" || trimmed === "REPLACE") continue;
+
+            // Skip bare file path headers from diffs
+            if (/^[a-zA-Z0-9_/.-]+\.(py|js|ts|json|md|yaml|yml)$/.test(trimmed)) continue;
+
+            // Skip filler phrases that add no value
+            if (/^Here is the (?:complete )?implementation/i.test(trimmed)) continue;
+            if (/^You can run the test suite/i.test(trimmed)) continue;
+            if (/^Let'?s create the/i.test(trimmed)) continue;
+            if (/^I will create/i.test(trimmed)) continue;
+            if (/^This (?:file )?will include/i.test(trimmed)) continue;
 
             useful.push(line);
         }
 
-        return useful.join("\n").slice(0, 2000) || "Aider completed analysis";
+        const cleaned = useful.join("\n").trim();
+        if (!cleaned || cleaned.length < 10) {
+            return "";
+        }
+        return cleaned.slice(0, 2000);
     }
 }

@@ -222,6 +222,9 @@ export class PipelineHandler {
             }
 
             // ── Step 5: PR Creation ─────────────────────────────────
+            // Always create PR if there are patches — even if some tests failed.
+            // The test results are visible in the PR and Jira comment.
+            // This lets reviewers see the generated tests and fix minor issues.
             let prUrl: string | null = null;
 
             const combinedPatches = [
@@ -229,15 +232,18 @@ export class PipelineHandler {
                 ...(execution.patches || [])
             ];
 
-            if (execution.success && combinedPatches.length > 0) {
+            if (combinedPatches.length > 0) {
                 log.info(`🔀 Creating PR...`, { issueKey: issue.key, step: "pr" });
-                const { result, duration_ms: prMs } = await withTiming(() =>
-                    this.createBranchAndPr(issue, repo, analysis, combinedPatches, context.repo.defaultBranch)
-                );
-                prUrl = result;
-                log.timed("info", `✅ PR: ${prUrl} (${(prMs / 1000).toFixed(1)}s)`, prMs, { issueKey: issue.key, step: "pr", prUrl });
-            } else if (!execution.success) {
-                log.warn(`⏭️ Skipping PR (tests failed)`, { issueKey: issue.key, step: "pr" });
+                try {
+                    const { result, duration_ms: prMs } = await withTiming(() =>
+                        this.createBranchAndPr(issue, repo, analysis, combinedPatches, context.repo.defaultBranch)
+                    );
+                    prUrl = result;
+                    log.timed("info", `✅ PR: ${prUrl} (${(prMs / 1000).toFixed(1)}s)`, prMs, { issueKey: issue.key, step: "pr", prUrl });
+                } catch (prErr) {
+                    log.error(`PR creation failed: ${String(prErr)}`);
+                    // Don't fail the whole pipeline just because PR creation failed
+                }
             }
 
             // ── Step 6: Report to Jira ──────────────────────────────
@@ -258,10 +264,13 @@ export class PipelineHandler {
             await this.jira.addComment(issue.key, report);
 
             // Update state
-            if (execution.success) {
+            // If PR was created, mark as success even if some tests failed.
+            // The test results are in the PR and Jira comment for review.
+            if (prUrl || execution.success) {
                 this.state.markSuccess(issue.key, prUrl ?? undefined);
                 const totalSec = Math.round(pipelineResult.duration_ms / 1000);
-                log.info(`🎉 ${issue.key} done — ${totalSec}s total${prUrl ? ` → ${prUrl}` : ''}`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
+                const statusEmoji = execution.success ? "🎉" : "⚠️";
+                log.info(`${statusEmoji} ${issue.key} done — ${totalSec}s total${prUrl ? ` → ${prUrl}` : ''}`, { issueKey: issue.key, duration_ms: pipelineResult.duration_ms });
             } else {
                 this.handleFailureState(issue.key, `Exit code: ${execution.exitCode}`);
             }
@@ -374,7 +383,7 @@ export class PipelineHandler {
 
             // Create PR — if it already exists, try to find the existing one
             const prTitle = `[${issue.key}] ${issue.summary}`;
-            const prBody = `## Jira Issue: ${issue.key}\n\n${analysis.summary}\n\n### Changes\n${analysis.plan}\n\n---\n*This PR was created automatically by AI Cyber Bot.*`;
+            const prBody = formatPrBody(issue, analysis, patches);
 
             try {
                 const prUrl = await this.scm.createPullRequest(
@@ -546,4 +555,123 @@ function isNetworkError(output: string): boolean {
         lower.includes("network is unreachable") ||
         lower.includes("socket.gaierror")
     );
+}
+
+/**
+ * Format a clean, readable PR body from analysis results.
+ * Strips diff artifacts, code blocks, and other noise from AI output.
+ */
+function formatPrBody(
+    issue: JiraIssue,
+    analysis: AiAnalysis,
+    patches: import("../types.js").AiPatch[],
+): string {
+    const lines: string[] = [];
+
+    lines.push(`## ${issue.key}: ${issue.summary}`);
+    lines.push("");
+
+    // Summary — clean it up
+    const summary = sanitizePlanText(analysis.summary);
+    if (summary) {
+        lines.push(`### Summary`);
+        lines.push(summary);
+        lines.push("");
+    }
+
+    // Test plan — only if it's meaningful after cleaning
+    const plan = sanitizePlanText(analysis.plan);
+    if (plan && plan.length > 20) {
+        lines.push(`### Test Plan`);
+        lines.push(plan);
+        lines.push("");
+    }
+
+    // Files changed — deduplicate by path
+    if (patches.length > 0) {
+        const seen = new Set<string>();
+        const uniquePatches = patches.filter(p => {
+            if (seen.has(p.path)) return false;
+            seen.add(p.path);
+            return true;
+        });
+
+        lines.push(`### Files`);
+        lines.push("");
+        for (const p of uniquePatches) {
+            const icon = p.action === "create" ? "🆕" : p.action === "delete" ? "🗑️" : "✏️";
+            lines.push(`- ${icon} \`${p.path}\``);
+        }
+        lines.push("");
+    }
+
+    // Commands
+    if (analysis.commands.length > 0) {
+        lines.push(`### Commands`);
+        lines.push("");
+        lines.push("```");
+        for (const cmd of analysis.commands) {
+            lines.push(cmd);
+        }
+        lines.push("```");
+        lines.push("");
+    }
+
+    lines.push("---");
+    lines.push("*This PR was created automatically by AI Cyber Bot.*");
+
+    return lines.join("\n");
+}
+
+/**
+ * Remove diff artifacts, code blocks, SEARCH/REPLACE markers, and other
+ * noise from AI-generated plan/summary text so it reads cleanly in PRs and Jira.
+ */
+function sanitizePlanText(text: string): string {
+    if (!text) return "";
+
+    const lines = text.split(/\r?\n/);
+    const clean: string[] = [];
+    let inCodeBlock = false;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        // Track fenced code blocks
+        if (trimmed.startsWith("```")) {
+            inCodeBlock = !inCodeBlock;
+            continue;
+        }
+        if (inCodeBlock) continue;
+
+        // Skip empty lines
+        if (trimmed === "") continue;
+
+        // Skip diff markers
+        if (trimmed.startsWith("<<<<<<")) continue;
+        if (trimmed.startsWith("======")) continue;
+        if (trimmed.startsWith(">>>>>>")) continue;
+        if (trimmed.startsWith("@@")) continue;
+        if (/^[+-][^+-]/.test(trimmed)) continue;
+        if (trimmed === "SEARCH" || trimmed === "REPLACE") continue;
+
+        // Skip "cmd.exe?" artifacts
+        if (trimmed.includes("cmd.exe?")) continue;
+        // Skip bare file path headers from diffs
+        if (/^[a-zA-Z0-9_/.-]+\.(py|js|ts|json|md|yaml|yml)$/.test(trimmed)) continue;
+
+        // Skip aider session noise
+        if (/^Tokens:\s/.test(trimmed)) continue;
+        if (/^Applied edit to\s/.test(trimmed)) continue;
+        if (/^python\s+[\w./-]+\.py$/.test(trimmed)) continue;
+
+        // Skip filler phrases
+        if (/^Here is the (?:complete )?implementation/i.test(trimmed)) continue;
+        if (/^You can run the test suite/i.test(trimmed)) continue;
+        if (/^Let'?s create the/i.test(trimmed)) continue;
+
+        clean.push(line);
+    }
+
+    return clean.join("\n").trim();
 }

@@ -57,6 +57,12 @@ const configSchema = z.object({
     dockerImage: z.string().default("auto"),
     allowInstallScripts: z.coerce.boolean().default(false),
 
+    // Container test environment overrides (comma-separated KEY=VALUE pairs)
+    containerTestEnv: z.string().optional(),
+
+    // Webhook security
+    webhookSecret: z.string().optional(),
+
     // MCP server paths
     mcpAtlassianUrl: z.string().default("http://127.0.0.1:9000/sse"),
 
@@ -124,6 +130,12 @@ export function loadConfig(): Config {
         execTimeoutMs: process.env.EXEC_TIMEOUT_MS ?? "300000",
         dockerImage: process.env.DOCKER_IMAGE ?? "auto",
         allowInstallScripts: (process.env.ALLOW_INSTALL_SCRIPTS ?? "false").toLowerCase() === "true",
+
+        // Container test env overrides
+        containerTestEnv: process.env.CONTAINER_TEST_ENV || undefined,
+
+        // Webhook security
+        webhookSecret: process.env.WEBHOOK_SECRET || undefined,
 
         // MCP
         mcpAtlassianUrl: process.env.MCP_SSE_URL ?? "http://127.0.0.1:9000/sse",

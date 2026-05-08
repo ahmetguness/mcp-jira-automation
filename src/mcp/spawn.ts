@@ -82,6 +82,7 @@ function getScmSpawnConfig(config: Config): SpawnConfig {
                 command: "docker",
                 args: [
                     "run", "--rm", "-i",
+                    "--network", "host",
                     "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
                     "ghcr.io/github/github-mcp-server",
                 ],

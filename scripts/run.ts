@@ -98,8 +98,18 @@ function startMcp(): ChildProcess {
   }
   const mcpEnv = loadEnvFile(envFile);
   const env = { ...process.env, ...mcpEnv };
+  const localMcp = isWindows
+    ? join(projectRoot, '.venv-mcp', 'Scripts', 'mcp-atlassian.exe')
+    : join(projectRoot, '.venv-mcp', 'bin', 'mcp-atlassian');
+  const mcpCommand = existsSync(localMcp) ? localMcp : 'mcp-atlassian';
 
-  const proc = spawn('mcp-atlassian', ['--transport', 'sse', '--port', '9000'], {
+  if (mcpCommand === localMcp) {
+    console.log(`[INFO]  Using local MCP Atlassian: ${localMcp}`);
+  } else {
+    console.log('[INFO]  Using MCP Atlassian from PATH');
+  }
+
+  const proc = spawn(mcpCommand, ['--transport', 'sse', '--port', '9000'], {
     cwd: projectRoot,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
