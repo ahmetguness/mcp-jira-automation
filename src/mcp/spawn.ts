@@ -28,7 +28,7 @@ export async function connectJiraMcp(config: Config): Promise<McpConnection> {
 /** Spawn SCM MCP server as a child process via stdio */
 export async function connectScmMcp(config: Config): Promise<McpConnection> {
     const { command, args, env, name } = getScmSpawnConfig(config);
-    log.debug(`Spawning: ${name} (${command} ${args.join(" ")})`);
+    log.debug(`Spawning: ${name} (${command} ${redactArgs(args).join(" ")})`);
 
     const transport = new StdioClientTransport({
         command,
@@ -78,6 +78,9 @@ function getScmSpawnConfig(config: Config): SpawnConfig {
     switch (config.scmProvider) {
         case "github":
             if (!config.githubToken) throw new Error("GITHUB_TOKEN is required when SCM_PROVIDER=github");
+            if (config.executorBackend === "ssh") {
+                return getRemoteGitHubMcpSpawnConfig(config);
+            }
             return {
                 command: "docker",
                 args: [
@@ -120,4 +123,46 @@ function getScmSpawnConfig(config: Config): SpawnConfig {
         default:
             throw new Error(`Unsupported SCM Provider: ${String(config.scmProvider)}`);
     }
+}
+
+function getRemoteGitHubMcpSpawnConfig(config: Config): SpawnConfig {
+    if (!config.sshHost || !config.sshUser) {
+        throw new Error("SSH_HOST and SSH_USER are required for remote GitHub MCP when EXECUTOR_BACKEND=ssh");
+    }
+
+    const sshArgs = [
+        "-p", String(config.sshPort),
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", `ConnectTimeout=${Math.max(1, Math.ceil(config.sshConnectTimeoutMs / 1000))}`,
+    ];
+    if (config.sshPrivateKeyPath) sshArgs.push("-i", config.sshPrivateKeyPath);
+
+    const remoteCommand = [
+        "env",
+        `GITHUB_PERSONAL_ACCESS_TOKEN=${shq(config.githubToken!)}`,
+        "docker", "run", "--rm", "-i",
+        "--network", "host",
+        "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server",
+    ].join(" ");
+
+    return {
+        command: "ssh",
+        args: [
+            ...sshArgs,
+            `${config.sshUser}@${config.sshHost}`,
+            remoteCommand,
+        ],
+        env: {},
+        name: "github-mcp-server@ssh",
+    };
+}
+
+function shq(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function redactArgs(args: string[]): string[] {
+    return args.map((arg) => arg.replace(/GITHUB_PERSONAL_ACCESS_TOKEN='[^']*'/g, "GITHUB_PERSONAL_ACCESS_TOKEN=<redacted>"));
 }

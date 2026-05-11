@@ -146,14 +146,39 @@ export class GitHubProvider implements ScmProvider {
 
     async writeFile(repo: string, path: string, content: string, message: string, branch: string): Promise<void> {
         const [owner, name] = this.parseRepo(repo);
-        await this.mcp.callScmTool("create_or_update_file", {
+        const args = {
             owner,
             repo: name,
             path,
             content,
             message,
             branch,
-        });
+        };
+
+        try {
+            await this.mcp.callScmTool("create_or_update_file", args);
+        } catch (e: unknown) {
+            const msg = String(e);
+            if (!msg.includes("File already exists") && !msg.includes("current file's SHA")) {
+                throw e;
+            }
+
+            const rawResult = await this.mcp.callScmTool("get_file_contents", {
+                owner,
+                repo: name,
+                path,
+                branch,
+            });
+            const current = parseGitHubFile(rawResult);
+            if (typeof current === "string" || !current.sha) {
+                throw e;
+            }
+
+            await this.mcp.callScmTool("create_or_update_file", {
+                ...args,
+                sha: current.sha,
+            });
+        }
     }
 
     async createPullRequest(

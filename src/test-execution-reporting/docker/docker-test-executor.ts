@@ -63,12 +63,12 @@ export class DockerTestExecutor implements IDockerTestExecutor {
   /**
    * Check if Docker is available and running
    */
-  async isDockerAvailable(): Promise<boolean> {
+  isDockerAvailable(): Promise<boolean> {
     try {
       execSync('docker version', { stdio: 'pipe', timeout: 5000 });
-      return true;
-    } catch (error) {
-      return false;
+      return Promise.resolve(true);
+    } catch {
+      return Promise.resolve(false);
     }
   }
 

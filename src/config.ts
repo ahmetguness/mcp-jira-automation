@@ -52,10 +52,21 @@ const configSchema = z.object({
     apiBaseUrl: z.string().optional(),
 
     // Executor
+    executorBackend: z.enum(["local", "ssh"]).default("local"),
     execPolicy: z.enum(["strict", "permissive"]).default("strict"),
     execTimeoutMs: z.coerce.number().int().default(300_000), // 5 min
     dockerImage: z.string().default("auto"),
     allowInstallScripts: z.coerce.boolean().default(false),
+
+    // SSH executor
+    sshHost: z.string().optional(),
+    sshPort: z.coerce.number().int().default(22),
+    sshUser: z.string().optional(),
+    sshPrivateKeyPath: z.string().optional(),
+    sshRemoteWorkdir: z.string().default("/tmp/mcp-jira-automation"),
+    sshConnectTimeoutMs: z.coerce.number().int().default(15_000),
+    sshCleanupWorkspace: z.coerce.boolean().default(true),
+    sshRemoveImage: z.coerce.boolean().default(false),
 
     // Container test environment overrides (comma-separated KEY=VALUE pairs)
     containerTestEnv: z.string().optional(),
@@ -75,6 +86,32 @@ const configSchema = z.object({
     // State
     stateFile: z.string().default("./data/state.json"),
     maxAttempts: z.coerce.number().int().default(3),
+}).superRefine((config, ctx) => {
+    if (config.executorBackend !== "ssh") return;
+
+    if (!config.sshHost) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["sshHost"],
+            message: "SSH_HOST is required when EXECUTOR_BACKEND=ssh",
+        });
+    }
+
+    if (!config.sshUser) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["sshUser"],
+            message: "SSH_USER is required when EXECUTOR_BACKEND=ssh",
+        });
+    }
+
+    if (!config.sshRemoteWorkdir.startsWith("/")) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["sshRemoteWorkdir"],
+            message: "SSH_REMOTE_WORKDIR must be an absolute POSIX path",
+        });
+    }
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -126,10 +163,21 @@ export function loadConfig(): Config {
         apiBaseUrl: process.env.API_BASE_URL || undefined,
 
         // Executor
+        executorBackend: process.env.EXECUTOR_BACKEND ?? "local",
         execPolicy: process.env.EXEC_POLICY ?? "strict",
         execTimeoutMs: process.env.EXEC_TIMEOUT_MS ?? "300000",
         dockerImage: process.env.DOCKER_IMAGE ?? "auto",
         allowInstallScripts: (process.env.ALLOW_INSTALL_SCRIPTS ?? "false").toLowerCase() === "true",
+
+        // SSH executor
+        sshHost: process.env.SSH_HOST || undefined,
+        sshPort: process.env.SSH_PORT ?? "22",
+        sshUser: process.env.SSH_USER || undefined,
+        sshPrivateKeyPath: process.env.SSH_PRIVATE_KEY_PATH || undefined,
+        sshRemoteWorkdir: process.env.SSH_REMOTE_WORKDIR ?? "/tmp/mcp-jira-automation",
+        sshConnectTimeoutMs: process.env.SSH_CONNECT_TIMEOUT_MS ?? "15000",
+        sshCleanupWorkspace: (process.env.SSH_CLEANUP_WORKSPACE ?? "true").toLowerCase() === "true",
+        sshRemoveImage: (process.env.SSH_REMOVE_IMAGE ?? "false").toLowerCase() === "true",
 
         // Container test env overrides
         containerTestEnv: process.env.CONTAINER_TEST_ENV || undefined,

@@ -18,6 +18,7 @@ export const ZodGitHubFile = z.object({
     path: z.string().optional(),
     name: z.string().optional(),
     type: z.string().optional(),
+    sha: z.string().optional(),
 }).catchall(z.unknown());
 
 export const ZodGitHubPullRequest = z.object({

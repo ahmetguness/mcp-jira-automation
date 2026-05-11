@@ -27,6 +27,7 @@ export function printStartupBanner(config: Config): void {
         `${chalk.magenta.bold("AI Provider:")}    ${chalk.white(config.aiProvider)}`,
         `${chalk.blue.bold("Mode:")}           ${chalk.white(config.mode)}`,
         `${chalk.yellow.bold("Policy:")}         ${chalk.white(config.execPolicy)}`,
+        `${chalk.yellow.bold("Executor:")}       ${chalk.white(config.executorBackend)}`,
         `${chalk.green.bold("Approval:")}       ${chalk.white(config.requireApproval ? "Required" : "Auto-run")}`,
         `${chalk.red.bold("Execution:")}      ${chalk.white(execModeLabel)}`,
         "",

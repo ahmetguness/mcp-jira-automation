@@ -6,26 +6,31 @@ import type { Config } from "../config.js";
 import type { AiAnalysis, ExecutionResult } from "../types.js";
 import { filterCommands, type ExecPolicy } from "./policy.js";
 import { DockerExecutor } from "./docker.js";
+import { SshDockerExecutor } from "./ssh-docker.js";
+import type { CommandExecutor } from "./runner.js";
 import { createLogger, withTiming } from "../logger.js";
 
 const log = createLogger("executor");
 
 export class Executor {
-    private docker: DockerExecutor;
+    private runner: CommandExecutor;
     private policy: ExecPolicy;
     private executionMode: "remote" | "sandbox";
     private apiBaseUrl?: string;
 
     constructor(config: Config) {
-        this.docker = new DockerExecutor(config);
+        this.runner = config.executorBackend === "ssh"
+            ? new SshDockerExecutor(config)
+            : new DockerExecutor(config);
         this.policy = config.execPolicy;
         this.executionMode = config.executionMode;
         this.apiBaseUrl = config.apiBaseUrl;
+        log.info(`Executor backend: ${config.executorBackend}`);
     }
 
-    /** Check if Docker is available */
+    /** Check if the configured executor backend is available */
     async isReady(): Promise<boolean> {
-        return this.docker.checkConnection();
+        return this.runner.checkConnection();
     }
 
     /**
@@ -68,9 +73,9 @@ export class Executor {
             .filter((p) => p.action !== "delete")
             .map((p) => ({ path: p.path, content: p.content }));
 
-        // Run in Docker
+        // Run in configured backend
         const { result, duration_ms } = await withTiming(async () =>
-            this.docker.run({
+            this.runner.run({
                 repoUrl,
                 branch,
                 commands: allowed,

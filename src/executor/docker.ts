@@ -24,7 +24,6 @@ import {
     detectProject,
     getAllMarkerFiles,
     applyInstallScriptsPolicy,
-    LANGUAGE_ENV,
     type Detection,
 } from "./project-detector.js";
 import {
@@ -38,6 +37,7 @@ import {
     verifyServerRunning,
 } from "./server-lifecycle.js";
 import { buildContainerEnv, parseContainerTestEnv } from "./container-env.js";
+import type { CommandExecutor, ExecutorRunResult } from "./runner.js";
 
 const log = createLogger("executor:docker");
 
@@ -45,12 +45,7 @@ const SCOUT_IMAGE = "alpine/git";
 
 // ─── Types ───────────────────────────────────────────────────
 
-interface DockerRunResult {
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-    patches?: { path: string; content: string; action: "create" | "modify" }[];
-}
+type DockerRunResult = ExecutorRunResult;
 
 // ─── Shared security HostConfig ──────────────────────────────
 
@@ -91,7 +86,7 @@ function securityHostConfig(opts?: { binds?: string[]; readonlyRootfs?: boolean;
 
 // ─── DockerExecutor ──────────────────────────────────────────
 
-export class DockerExecutor {
+export class DockerExecutor implements CommandExecutor {
     private docker: Docker;
     private configImage: string;
     private timeoutMs: number;

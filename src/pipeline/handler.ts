@@ -227,10 +227,10 @@ export class PipelineHandler {
             // This lets reviewers see the generated tests and fix minor issues.
             let prUrl: string | null = null;
 
-            const combinedPatches = [
+            const combinedPatches = mergePatchesByPath([
                 ...analysis.patches,
                 ...(execution.patches || [])
-            ];
+            ]);
 
             if (combinedPatches.length > 0) {
                 log.info(`🔀 Creating PR...`, { issueKey: issue.key, step: "pr" });
@@ -440,6 +440,14 @@ function slugify(text: string): string {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "")
         .slice(0, 40);
+}
+
+function mergePatchesByPath(patches: import("../types.js").AiPatch[]): import("../types.js").AiPatch[] {
+    const byPath = new Map<string, import("../types.js").AiPatch>();
+    for (const patch of patches) {
+        byPath.set(patch.path, patch);
+    }
+    return [...byPath.values()];
 }
 
 /** Extract execution_mode from Jira issue description for per-task override */

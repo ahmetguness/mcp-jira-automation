@@ -4,7 +4,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { IssueState, IssueStatus } from "../types.js";
 import { createLogger } from "../logger.js";
 

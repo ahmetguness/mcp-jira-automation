@@ -265,16 +265,7 @@ export class JiraClient {
                 const value = result?.fields?.[fieldId] ?? result?.[fieldId] ?? null;
 
                 if (value) {
-                    let urlValue: string;
-                    if (typeof value === 'string') {
-                        urlValue = value;
-                    } else if (value && typeof value === 'object' && 'value' in value) {
-                        urlValue = String((value as { value: unknown }).value);
-                    } else {
-                        urlValue = String(value);
-                    }
-
-                    urlValue = urlValue.trim().replace(/\/+$/, "");
+                    const urlValue = stringifyJiraFieldValue(value).trim().replace(/\/+$/, "");
                     if (urlValue && urlValue.startsWith("http")) {
                         log.info(`Base URL from custom field: ${urlValue}`);
                         return urlValue;
@@ -380,9 +371,7 @@ export class JiraClient {
 
             if (!value) return {};
 
-            const text = typeof value === 'string' ? value :
-                (value && typeof value === 'object' && 'value' in value) ? String((value as { value: unknown }).value) :
-                    typeof value === 'object' ? JSON.stringify(value) : String(value);
+            const text = stringifyJiraFieldValue(value);
 
             // Parse KEY=VALUE lines
             const credentials: Record<string, string> = {};
@@ -562,4 +551,15 @@ function parseRepoFromDescription(description: string): string | null {
     }
 
     return null;
+}
+
+function stringifyJiraFieldValue(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+        return String(value);
+    }
+    if (value && typeof value === "object" && "value" in value) {
+        return stringifyJiraFieldValue((value as { value: unknown }).value);
+    }
+    return JSON.stringify(value) ?? "";
 }
