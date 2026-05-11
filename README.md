@@ -1,108 +1,138 @@
 # MCP Jira Automation
 
-Jira issue'larını okuyup ilgili repo'dan kaynak kodu çeken, AI ile test üretip Docker'da çalıştıran ve sonucu PR + Jira yorumu olarak raporlayan otomasyon servisi.
+MCP Jira Automation is an AI-assisted automation service for Jira-driven development workflows. It polls or receives Jira issues, resolves the target source repository, generates or updates tests with an AI provider, executes them in Docker, opens a pull request, and reports the outcome back to Jira.
 
-## Mimari
+The service is designed to work with a separately running `mcp-atlassian` server, which provides Jira access through the Model Context Protocol.
 
-```
-mcp-atlassian (bağımsız servis, port 9000)
-    └── mcp-jira-automation (bu proje)
+## Architecture
+
+```text
+mcp-atlassian (standalone service, port 9000)
+    -> mcp-jira-automation (this project)
 ```
 
 ```mermaid
 graph TD
-    A[Jira Issue] --> B[MCP Atlassian]
-    B --> C[Jira Poller]
-    C --> D[PipelineHandler]
-    D --> E[Repository custom field]
-    E --> F[SCM Provider]
-    F --> G[Kaynak dosyalar]
-    G --> H[AI Provider]
-    H --> I[Patch + Komutlar]
+    A[Jira issue] --> B[MCP Atlassian]
+    B --> C[Jira poller or webhook]
+    C --> D[Pipeline handler]
+    D --> E[Repository resolver]
+    E --> F[SCM provider]
+    F --> G[Source repository]
+    G --> H[AI provider]
+    H --> I[Generated tests and commands]
     I --> J{Executor}
     J -->|local| K[Local Docker]
-    J -->|ssh| L[Remote SSH Docker]
-    K --> M[Test Sonuçları]
+    J -->|ssh| L[Remote Docker over SSH]
+    K --> M[Test results]
     L --> M
-    M --> N[Pull Request]
-    M --> O[Jira Yorumu]
+    M --> N[Pull request]
+    M --> O[Jira comment]
     O --> B
 ```
 
-## Gereksinimler
+## Capabilities
 
-- Node.js 20+
-- Docker (local executor için)
-- Bitbucket / GitHub / GitLab erişim token'ı
-- `mcp-atlassian` servisi (ayrı çalışır)
-- AI provider credentials (OpenAI, Anthropic, Gemini, vLLM) veya Aider CLI
+- Reads Jira issues through `mcp-atlassian`.
+- Resolves repositories from Jira custom fields, issue descriptions, or repository URLs.
+- Supports GitHub, GitLab, and Bitbucket source control integrations.
+- Uses OpenAI, Anthropic, Gemini, vLLM, or Aider for AI-assisted test generation.
+- Runs generated tests against an existing remote API or inside an isolated Docker sandbox.
+- Supports local Docker execution and remote Docker execution over SSH.
+- Creates pull requests with generated test changes.
+- Posts execution summaries and failures back to Jira.
+- Supports per-issue prompt overrides and global custom prompts.
 
-## Kurulum
+## Requirements
+
+- Node.js 20 or later
+- Docker, when using the local executor or sandbox mode
+- Access token for GitHub, GitLab, or Bitbucket
+- A running `mcp-atlassian` service
+- Credentials for at least one AI provider, or Aider CLI access
+
+## Installation
+
+Install dependencies, build the project, and link the `mja` CLI:
 
 ```bash
 npm install
 npm run build
-npm install -g .   # mja komutunu PATH'e ekler
+npm install -g .
 ```
 
-Konfigürasyon dosyalarını oluştur:
+Create local configuration files:
 
 ```bash
 cp .env.example .env
 cp mcp-atlassian.env.example mcp-atlassian.env
 ```
 
-`.env` ve `mcp-atlassian.env` dosyalarını düzenle.
+Edit both files with your Jira, SCM, AI provider, executor, and MCP settings.
 
-## Çalıştırma
+## Running the Services
 
-**Terminal 1 — MCP Atlassian:**
+Start `mcp-atlassian` first. See the upstream project for installation details:
 
-> Kurulum ve detaylar: [github.com/sooperset/mcp-atlassian](https://github.com/sooperset/mcp-atlassian)
+https://github.com/sooperset/mcp-atlassian
+
+Example:
 
 ```bash
 cd /path/to/mcp-atlassian
 uv run mcp-atlassian --transport streamable-http --host 0.0.0.0 --port 9000 --path /mcp
 ```
 
-> `UV_ENV_FILE` ortam değişkenini kalıcı olarak set edersen `--env-file` parametresine gerek kalmaz:
-> ```powershell
-> [Environment]::SetEnvironmentVariable("UV_ENV_FILE", "C:\path\to\mcp-atlassian.env", "User")
-> ```
+If you use `UV_ENV_FILE`, point it to your `mcp-atlassian.env` file so the MCP service can load the Jira credentials:
 
-**Terminal 2 — Uygulama:**
+```powershell
+[Environment]::SetEnvironmentVariable("UV_ENV_FILE", "C:\path\to\mcp-atlassian.env", "User")
+```
+
+Then start the automation service:
 
 ```bash
 mja app
 ```
 
-**CLI komutları:**
+Useful CLI commands:
 
 ```bash
-mja app    # Uygulamayı başlat (MCP ayrıca çalışıyor olmalı)
-mja help   # Yardım
+mja app
+mja help
 ```
 
 ## Jira Workflow
 
-Servis, JQL ile eşleşen issue'ları poll eder. Varsayılan JQL `JQL_ASSIGNED_TO_BOT` ile override edilebilir.
+The service polls Jira with a JQL query, unless webhook mode is enabled. The default query can be replaced with `JQL_ASSIGNED_TO_BOT`.
 
-### Repository Belirleme
+For each matching issue, the service:
 
-Hedef repo şu kaynaklardan okunur (öncelik sırasıyla):
+1. Reads issue metadata and description.
+2. Resolves the target repository.
+3. Clones or accesses the repository through the configured SCM provider.
+4. Builds an AI prompt from the issue, repository context, and optional prompt overrides.
+5. Generates test changes.
+6. Runs the tests with the configured execution backend.
+7. Creates a pull request.
+8. Posts the result to Jira.
 
-1. Jira `Repository` custom field'ı
-2. Issue description'da `Repository: owner/repo` satırı
-3. Issue description'da GitHub/GitLab/Bitbucket URL'i
+### Repository Resolution
 
-### Issue Description Örneği
+The target repository is resolved in this order:
 
-```
+1. Jira `Repository` custom field.
+2. A `Repository: owner/repo` line in the issue description.
+3. A GitHub, GitLab, or Bitbucket URL in the issue description.
+
+### Issue Description Example
+
+```text
 Repository: ahmet/example-api
 
 base_url: https://staging.example.com
 
-Auth endpointlerini test et:
+Test the authentication endpoints:
 - POST /api/auth/register
 - POST /api/auth/login
 - GET /api/auth/profile
@@ -110,56 +140,57 @@ Auth endpointlerini test et:
 
 ### Per-Issue Overrides
 
-| Alan | Açıklama |
-|------|----------|
-| `base_url: https://...` | Bu issue için hedef API URL'i. Remote modu implicitly aktif eder. |
-| `execution_mode: remote` | Testleri dış API'ye karşı çalıştır. |
-| `execution_mode: sandbox` | Backend'i Docker'da başlatıp yerel test et. |
+| Field | Description |
+| --- | --- |
+| `base_url: https://...` | Target API URL for this issue. This implicitly enables remote execution for the task. |
+| `execution_mode: remote` | Runs tests against an already running API. |
+| `execution_mode: sandbox` | Starts the backend in Docker and runs tests locally inside the sandbox. |
 
 ### Per-Issue Prompt Override
 
-Issue description'ına `[PROMPT]...[/PROMPT]` bloğu ekleyerek AI'a özel talimat verebilirsin:
+Add a `[PROMPT]...[/PROMPT]` block to the issue description to provide task-specific AI instructions:
 
-```
+```text
 Repository: ahmet/example-api
 
 [PROMPT]
-Sadece /auth endpointlerini test et.
-Test yorumlarını Türkçe yaz.
+Only test the /auth endpoints.
+Write test names and comments in English.
 [/PROMPT]
 ```
 
-## Prompt Özelleştirme
+## Prompt Customization
 
-AI'ın kullandığı sistem prompt'u üç seviyede özelleştirilebilir:
+The system prompt can be customized at three levels:
 
-| Seviye | Yöntem | Kapsam |
-|--------|--------|--------|
-| Global | `prompts/custom.md` dosyası oluştur | Tüm issue'lar |
-| Global | `.env`'e `CUSTOM_PROMPT_FILE=/path/to/prompt.md` ekle | Tüm issue'lar |
-| Per-issue | Description'a `[PROMPT]...[/PROMPT]` ekle | Tek issue |
+| Level | Method | Scope |
+| --- | --- | --- |
+| Global | Create `prompts/custom.md` | All issues |
+| Global | Set `CUSTOM_PROMPT_FILE=/path/to/prompt.md` in `.env` | All issues |
+| Per issue | Add `[PROMPT]...[/PROMPT]` to the Jira description | Single issue |
 
-`prompts/custom.md.example` dosyasını başlangıç noktası olarak kullanabilirsin.
+Use `prompts/custom.md.example` as a starting point.
 
 ## Execution Modes
 
 ### Remote Mode
 
-Halihazırda çalışan bir API'ye karşı test üretir. Bağımlılık kurulumu veya backend başlatma yapmaz.
+Remote mode generates and runs tests against an already running API. It does not install backend dependencies or start application services.
 
 ```env
 EXECUTION_MODE=remote
 API_BASE_URL=https://staging-api.example.com
 ```
 
-API base URL öncelik sırası:
-1. Jira custom field veya description'daki `base_url`
-2. `.env`'deki `API_BASE_URL`
-3. README'den otomatik tespit
+The API base URL is resolved in this order:
+
+1. Jira custom field or `base_url` in the issue description.
+2. `API_BASE_URL` in `.env`.
+3. Automatic detection from the repository README, when available.
 
 ### Sandbox Mode
 
-Repo'yu Docker'a klonlar, proje tipini tespit eder, bağımlılıkları kurar, backend ve veritabanı servislerini başlatır.
+Sandbox mode clones the repository into Docker, detects the project type, installs dependencies, starts backend services, and runs tests in isolation.
 
 ```env
 EXECUTION_MODE=sandbox
@@ -167,17 +198,17 @@ EXECUTION_MODE=sandbox
 
 ## Executor Backends
 
-### Local
+### Local Docker
 
-Docker aynı makinede çalışır.
+Use the local backend when Docker runs on the same machine as this service:
 
 ```env
 EXECUTOR_BACKEND=local
 ```
 
-### SSH
+### SSH Docker
 
-Docker uzak makinede çalışır.
+Use the SSH backend when Docker runs on a remote host:
 
 ```env
 EXECUTOR_BACKEND=ssh
@@ -190,14 +221,26 @@ SSH_CLEANUP_WORKSPACE=true
 SSH_REMOVE_IMAGE=false
 ```
 
+The remote user must have access to `git` and Docker.
+
 ## AI Providers
 
+Select the AI provider with `AI_PROVIDER`:
+
 ```env
-AI_PROVIDER=openai    # openai | anthropic | gemini | vllm | aider
+AI_PROVIDER=openai
 AI_MODEL=gpt-4o
 ```
 
-Aider için:
+Supported values:
+
+- `openai`
+- `anthropic`
+- `gemini`
+- `vllm`
+- `aider`
+
+For Aider:
 
 ```env
 AI_PROVIDER=aider
@@ -206,74 +249,88 @@ AIDER_PATH=aider
 OPENAI_API_KEY=sk-...
 ```
 
-## Konfigürasyon Referansı
+## Configuration Reference
 
-### .env
+### Application Environment
 
-| Değişken | Açıklama |
-|----------|----------|
-| `JIRA_BASE_URL` | Jira base URL |
-| `JIRA_EMAIL` | Jira hesap e-postası |
-| `JIRA_API_TOKEN` | Jira API token'ı |
-| `JIRA_PROJECT_KEY` | Jira proje anahtarı |
-| `JIRA_AI_BOT_DISPLAY_NAME` | Bot kullanıcısının Jira görünen adı |
-| `JIRA_REPO_FIELD_ID` | Repository custom field ID (opsiyonel, otomatik tespit edilir) |
-| `JIRA_CREDENTIALS_FIELD_ID` | Credentials custom field ID (opsiyonel) |
-| `JIRA_BASE_URL_FIELD_ID` | Base URL custom field ID (opsiyonel) |
-| `JQL_ASSIGNED_TO_BOT` | JQL override (opsiyonel) |
-| `MODE` | `poll` veya `webhook` |
-| `POLL_INTERVAL_MS` | Poll aralığı (ms) |
-| `SCM_PROVIDER` | `github`, `gitlab`, veya `bitbucket` |
-| `GITHUB_TOKEN` | GitHub erişim token'ı |
-| `GITLAB_TOKEN` | GitLab erişim token'ı |
-| `BITBUCKET_EMAIL` | Bitbucket hesap e-postası |
-| `BITBUCKET_API_TOKEN` | Bitbucket API token'ı |
-| `BITBUCKET_USERNAME` | Bitbucket kullanıcı adı |
-| `AI_PROVIDER` | `openai`, `anthropic`, `gemini`, `vllm`, veya `aider` |
-| `AI_MODEL` | Model adı |
-| `AIDER_MODEL` | Aider model adı |
-| `AIDER_PATH` | Aider executable yolu |
-| `EXECUTION_MODE` | `remote` veya `sandbox` |
-| `API_BASE_URL` | Remote mod için hedef API URL'i |
-| `EXECUTOR_BACKEND` | `local` veya `ssh` |
-| `EXEC_POLICY` | `strict` veya `permissive` |
-| `DOCKER_IMAGE` | `auto` veya belirli bir Docker image |
-| `EXEC_TIMEOUT_MS` | Test execution timeout (ms) |
-| `ALLOW_INSTALL_SCRIPTS` | Bağımlılık kurulum scriptlerine izin ver |
-| `SSH_HOST` | SSH executor için uzak host |
-| `SSH_PORT` | SSH portu |
-| `SSH_USER` | SSH kullanıcı adı |
-| `SSH_PRIVATE_KEY_PATH` | SSH private key yolu |
-| `SSH_REMOTE_WORKDIR` | Uzak workspace kök dizini |
-| `SSH_CONNECT_TIMEOUT_MS` | SSH bağlantı timeout (ms) |
-| `SSH_CLEANUP_WORKSPACE` | Execution sonrası workspace'i sil |
-| `SSH_REMOVE_IMAGE` | Execution sonrası Docker image'ı sil |
-| `CONTAINER_TEST_ENV` | Test container'ı için env override'ları (virgülle ayrılmış KEY=VALUE) |
-| `REQUIRE_APPROVAL` | Execution öncesi onay bekle |
-| `MCP_URL` | MCP Atlassian URL'i |
-| `MCP_TRANSPORT` | `sse` veya `streamable-http` |
-| `CUSTOM_PROMPT_FILE` | Özel sistem prompt dosyası yolu |
-| `LOG_LEVEL` | `debug`, `info`, `warn`, `error`, veya `silent` |
-| `STATE_FILE` | Kalıcı state dosyası yolu |
-| `MAX_ATTEMPTS` | Başarısız issue'lar için maksimum deneme sayısı |
+| Variable | Description |
+| --- | --- |
+| `JIRA_BASE_URL` | Jira base URL. |
+| `JIRA_EMAIL` | Jira account email. |
+| `JIRA_API_TOKEN` | Jira API token. |
+| `JIRA_PROJECT_KEY` | Jira project key. |
+| `JIRA_AI_BOT_DISPLAY_NAME` | Jira display name of the bot user. |
+| `JIRA_REPO_FIELD_ID` | Optional repository custom field ID. Auto-detected when omitted. |
+| `JIRA_CREDENTIALS_FIELD_ID` | Optional credentials custom field ID. |
+| `JIRA_BASE_URL_FIELD_ID` | Optional base URL custom field ID. |
+| `JQL_ASSIGNED_TO_BOT` | Optional JQL override. |
+| `MODE` | `poll` or `webhook`. |
+| `POLL_INTERVAL_MS` | Polling interval in milliseconds. |
+| `WEBHOOK_PORT` | HTTP port for webhook mode. |
+| `WEBHOOK_SECRET` | HMAC secret used to verify webhook signatures. |
+| `SCM_PROVIDER` | `github`, `gitlab`, or `bitbucket`. |
+| `GITHUB_TOKEN` | GitHub access token. |
+| `GITLAB_TOKEN` | GitLab access token. |
+| `GITLAB_URL` | GitLab base URL. Defaults to GitLab.com when omitted. |
+| `BITBUCKET_EMAIL` | Atlassian account email for Bitbucket Cloud API access. |
+| `BITBUCKET_API_TOKEN` | Bitbucket API token. |
+| `BITBUCKET_USERNAME` | Optional Bitbucket username. |
+| `BITBUCKET_WORKSPACE` | Optional Bitbucket workspace. |
+| `AI_PROVIDER` | `openai`, `anthropic`, `gemini`, `vllm`, or `aider`. |
+| `AI_MODEL` | Model name for the selected provider. |
+| `OPENAI_API_KEY` | OpenAI API key. |
+| `ANTHROPIC_API_KEY` | Anthropic API key. |
+| `GEMINI_API_KEY` | Gemini API key. |
+| `VLLM_BASE_URL` | vLLM OpenAI-compatible API base URL. |
+| `VLLM_MODEL` | vLLM model name. |
+| `AIDER_MODEL` | Aider model name. |
+| `AIDER_PATH` | Path to the Aider executable. |
+| `EXECUTION_MODE` | `remote` or `sandbox`. |
+| `API_BASE_URL` | Target API URL for remote mode. |
+| `EXECUTOR_BACKEND` | `local` or `ssh`. |
+| `EXEC_POLICY` | `strict` or `permissive`. |
+| `DOCKER_IMAGE` | `auto` or an explicit Docker image. |
+| `EXEC_TIMEOUT_MS` | Test execution timeout in milliseconds. |
+| `ALLOW_INSTALL_SCRIPTS` | Allows dependency installation scripts when enabled. |
+| `SSH_HOST` | Remote host for the SSH executor. |
+| `SSH_PORT` | SSH port. |
+| `SSH_USER` | SSH username. |
+| `SSH_PRIVATE_KEY_PATH` | Path to the SSH private key. |
+| `SSH_REMOTE_WORKDIR` | Remote workspace root directory. |
+| `SSH_CONNECT_TIMEOUT_MS` | SSH connection timeout in milliseconds. |
+| `SSH_CLEANUP_WORKSPACE` | Removes the remote workspace after execution when enabled. |
+| `SSH_REMOVE_IMAGE` | Removes the Docker image after execution when enabled. |
+| `CONTAINER_TEST_ENV` | Comma-separated `KEY=VALUE` overrides for test containers. |
+| `REQUIRE_APPROVAL` | Requires Jira approval before running generated tests when enabled. |
+| `MCP_URL` | MCP Atlassian streamable HTTP URL. |
+| `MCP_TRANSPORT` | `streamable-http` or `sse`. |
+| `MCP_SSE_URL` | Legacy SSE URL. |
+| `CUSTOM_PROMPT_FILE` | Path to a custom system prompt file. |
+| `LOG_LEVEL` | `debug`, `info`, `warn`, `error`, or `silent`. |
+| `STATE_FILE` | Persistent state file path. |
+| `MAX_ATTEMPTS` | Maximum retry count for failed issues. |
 
-### mcp-atlassian.env
+### MCP Atlassian Environment
 
-| Değişken | Açıklama |
-|----------|----------|
-| `JIRA_URL` | Jira instance URL'i |
-| `JIRA_USERNAME` | Jira e-posta adresi |
-| `JIRA_API_TOKEN` | Jira API token'ı |
-| `CONFLUENCE_URL` | Confluence URL'i (opsiyonel) |
-| `CONFLUENCE_USERNAME` | Confluence e-posta adresi (opsiyonel) |
-| `CONFLUENCE_API_TOKEN` | Confluence API token'ı (opsiyonel) |
-| `TRANSPORT` | `streamable-http` veya `sse` |
-| `PORT` | MCP sunucu portu |
-| `HOST` | MCP sunucu host'u |
-| `TOOLSETS` | Aktif toolset'ler |
-| `FASTMCP_LOG_LEVEL` | FastMCP log seviyesi |
+| Variable | Description |
+| --- | --- |
+| `JIRA_URL` | Jira instance URL. |
+| `JIRA_USERNAME` | Jira account email. |
+| `JIRA_API_TOKEN` | Jira API token. |
+| `CONFLUENCE_URL` | Optional Confluence URL. |
+| `CONFLUENCE_USERNAME` | Optional Confluence account email. |
+| `CONFLUENCE_API_TOKEN` | Optional Confluence API token. |
+| `TRANSPORT` | `streamable-http` or `sse`. |
+| `PORT` | MCP server port. |
+| `HOST` | MCP server host. |
+| `MCP_HTTP_PATH` | HTTP path for streamable HTTP transport. |
+| `TOOLSETS` | Enabled MCP toolsets. |
+| `READ_ONLY_MODE` | Disables write operations when enabled. |
+| `FASTMCP_LOG_LEVEL` | FastMCP log level. |
+| `MCP_VERBOSE` | Enables normal verbose MCP logging. |
+| `MCP_VERY_VERBOSE` | Enables debug-level MCP logging. |
 
-## Geliştirme
+## Development
 
 ```bash
 npm run build
@@ -281,8 +338,17 @@ npm run lint
 npm test
 ```
 
-## Bilinen Kısıtlamalar
+Run the application without linking the CLI:
 
-- SSH backend şu an remote API testine odaklanır. Local sandbox backend ile tam parite (veritabanı, backend lifecycle) henüz mevcut değil.
-- AI üretilen testler route parametreleri veya auth hakkında yanlış varsayımlar yapabilir. Başarısız sonuçlar Jira ve PR'da görünür.
-- Testler başarısız olsa bile PR oluşturulabilir — bu kasıtlıdır, inceleme için.
+```bash
+npm run mja:app
+```
+
+## Operational Notes
+
+- Keep `.env` and `mcp-atlassian.env` out of version control. They contain API tokens and secrets.
+- In production webhook mode, set `WEBHOOK_SECRET`.
+- Use `EXEC_POLICY=strict` unless the target repositories require broader command execution.
+- Generated tests may fail because of incomplete issue context, missing authentication details, or incorrect assumptions about API behavior. Failures are reported to Jira and the pull request for review.
+- A pull request may still be created when tests fail. This is intentional so the generated changes and execution logs can be reviewed.
+- The SSH backend focuses on remote Docker execution. Full feature parity with the local sandbox backend may depend on the target project and remote host configuration.
