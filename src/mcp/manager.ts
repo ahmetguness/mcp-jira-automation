@@ -77,6 +77,11 @@ export class McpManager {
         this.jira = await connectJiraMcp(this.config);
         const { tools: jiraTools } = await this.jira.client.listTools();
 
+        if (this.config.scmProvider === "bitbucket") {
+            log.info(`MCP ready: mcp-atlassian (${jiraTools.length} tools), bitbucket (direct REST)`);
+            return;
+        }
+
         this.scm = await connectScmMcp(this.config);
         const { tools: scmTools } = await this.scm.client.listTools();
 

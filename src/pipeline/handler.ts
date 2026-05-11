@@ -426,6 +426,9 @@ export class PipelineHandler {
             case "gitlab":
                 return `${this.config.gitlabUrl}/${repo}.git`;
             case "bitbucket":
+                if (this.config.bitbucketApiToken) {
+                    return `https://x-bitbucket-api-token-auth:${encodeURIComponent(this.config.bitbucketApiToken)}@bitbucket.org/${repo}.git`;
+                }
                 return `https://bitbucket.org/${repo}.git`;
             default:
                 return `https://github.com/${repo}.git`;

@@ -106,15 +106,20 @@ function getScmSpawnConfig(config: Config): SpawnConfig {
             };
 
         case "bitbucket":
-            if (!config.bitbucketUsername || !config.bitbucketAppPassword) {
-                throw new Error("BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD are required when SCM_PROVIDER=bitbucket");
+            if (config.bitbucketApiToken) {
+                if (!config.bitbucketEmail) throw new Error("BITBUCKET_EMAIL is required with BITBUCKET_API_TOKEN when SCM_PROVIDER=bitbucket");
+            } else if (!config.bitbucketUsername || !config.bitbucketAppPassword) {
+                throw new Error("BITBUCKET_EMAIL and BITBUCKET_API_TOKEN are required when SCM_PROVIDER=bitbucket");
+            }
+            if (config.executorBackend === "ssh") {
+                return getRemoteBitbucketMcpSpawnConfig(config);
             }
             return {
                 command: "uvx",
-                args: ["mcp-bitbucket"],
+                args: ["--from", "iflow-mcp-kallows-mcp-bitbucket", "iflow-mcp_kallows-mcp-bitbucket"],
                 env: {
-                    BITBUCKET_USERNAME: config.bitbucketUsername,
-                    BITBUCKET_APP_PASSWORD: config.bitbucketAppPassword,
+                    BITBUCKET_USERNAME: config.bitbucketUsername ?? config.bitbucketEmail ?? "",
+                    BITBUCKET_APP_PASSWORD: config.bitbucketAppPassword ?? config.bitbucketApiToken ?? "",
                     ...(config.bitbucketWorkspace ? { BITBUCKET_WORKSPACE: config.bitbucketWorkspace } : {}),
                 },
                 name: "mcp-bitbucket",
@@ -125,11 +130,7 @@ function getScmSpawnConfig(config: Config): SpawnConfig {
     }
 }
 
-function getRemoteGitHubMcpSpawnConfig(config: Config): SpawnConfig {
-    if (!config.sshHost || !config.sshUser) {
-        throw new Error("SSH_HOST and SSH_USER are required for remote GitHub MCP when EXECUTOR_BACKEND=ssh");
-    }
-
+function buildBaseSshArgs(config: Config): string[] {
     const sshArgs = [
         "-p", String(config.sshPort),
         "-o", "BatchMode=yes",
@@ -137,6 +138,15 @@ function getRemoteGitHubMcpSpawnConfig(config: Config): SpawnConfig {
         "-o", `ConnectTimeout=${Math.max(1, Math.ceil(config.sshConnectTimeoutMs / 1000))}`,
     ];
     if (config.sshPrivateKeyPath) sshArgs.push("-i", config.sshPrivateKeyPath);
+    return sshArgs;
+}
+
+function getRemoteGitHubMcpSpawnConfig(config: Config): SpawnConfig {
+    if (!config.sshHost || !config.sshUser) {
+        throw new Error("SSH_HOST and SSH_USER are required for remote GitHub MCP when EXECUTOR_BACKEND=ssh");
+    }
+
+    const sshArgs = buildBaseSshArgs(config);
 
     const remoteCommand = [
         "env",
@@ -159,10 +169,37 @@ function getRemoteGitHubMcpSpawnConfig(config: Config): SpawnConfig {
     };
 }
 
+function getRemoteBitbucketMcpSpawnConfig(config: Config): SpawnConfig {
+    if (!config.sshHost || !config.sshUser) {
+        throw new Error("SSH_HOST and SSH_USER are required for remote Bitbucket MCP when EXECUTOR_BACKEND=ssh");
+    }
+
+    const envParts = [
+        `BITBUCKET_USERNAME=${shq(config.bitbucketUsername!)}`,
+        `BITBUCKET_APP_PASSWORD=${shq(config.bitbucketAppPassword!)}`,
+    ];
+    if (config.bitbucketWorkspace) {
+        envParts.push(`BITBUCKET_WORKSPACE=${shq(config.bitbucketWorkspace)}`);
+    }
+
+    return {
+        command: "ssh",
+        args: [
+            ...buildBaseSshArgs(config),
+            `${config.sshUser}@${config.sshHost}`,
+            ["env", ...envParts, "sh", "-lc", shq("UVX=$(command -v uvx || printf '%s/.local/bin/uvx' \"$HOME\"); exec \"$UVX\" --from iflow-mcp-kallows-mcp-bitbucket iflow-mcp_kallows-mcp-bitbucket")].join(" "),
+        ],
+        env: {},
+        name: "mcp-bitbucket@ssh",
+    };
+}
+
 function shq(value: string): string {
     return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function redactArgs(args: string[]): string[] {
-    return args.map((arg) => arg.replace(/GITHUB_PERSONAL_ACCESS_TOKEN='[^']*'/g, "GITHUB_PERSONAL_ACCESS_TOKEN=<redacted>"));
+    return args.map((arg) => arg
+        .replace(/GITHUB_PERSONAL_ACCESS_TOKEN='[^']*'/g, "GITHUB_PERSONAL_ACCESS_TOKEN=<redacted>")
+        .replace(/BITBUCKET_APP_PASSWORD='[^']*'/g, "BITBUCKET_APP_PASSWORD=<redacted>"));
 }

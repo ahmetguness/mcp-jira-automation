@@ -266,8 +266,10 @@ In `strict` mode, only allowlisted test and build commands are executed. Shell o
 | `GITHUB_TOKEN` | GitHub access token. |
 | `GITLAB_TOKEN` | GitLab access token. |
 | `GITLAB_URL` | GitLab base URL. |
-| `BITBUCKET_USERNAME` | Bitbucket username. |
-| `BITBUCKET_APP_PASSWORD` | Bitbucket app password. |
+| `BITBUCKET_EMAIL` | Atlassian account email for Bitbucket API token authentication. |
+| `BITBUCKET_API_TOKEN` | Bitbucket API token with repository and pull request scopes. |
+| `BITBUCKET_USERNAME` | Bitbucket username/workspace slug, used for Git operations and repository references. |
+| `BITBUCKET_APP_PASSWORD` | Deprecated Bitbucket app password fallback for older accounts. |
 | `AI_PROVIDER` | `openai`, `anthropic`, `gemini`, `vllm`, or `aider`. |
 | `AI_MODEL` | Model name for non-Aider providers. |
 | `AIDER_MODEL` | Model used by Aider. |

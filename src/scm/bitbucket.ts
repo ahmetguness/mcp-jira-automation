@@ -4,7 +4,6 @@
 
 import type { ScmProvider } from "./provider.js";
 import type { ScmFile, RepoInfo } from "../types.js";
-import { parseBitbucketSearchResponse, parseBitbucketFile, parseBitbucketPullRequest } from "../validation/scm.js";
 import type { McpManager } from "../mcp/manager.js";
 import type { Config } from "../config.js";
 import { createLogger } from "../logger.js";
@@ -13,53 +12,54 @@ const log = createLogger("scm:bitbucket");
 
 export class BitbucketProvider implements ScmProvider {
     private workspace: string;
+    private username: string;
+    private appPassword: string;
+    private email: string;
+    private apiToken: string;
 
     constructor(
         private mcp: McpManager,
         config: Config,
     ) {
         this.workspace = config.bitbucketWorkspace ?? "";
+        this.username = config.bitbucketUsername ?? "";
+        this.appPassword = config.bitbucketAppPassword ?? "";
+        this.email = config.bitbucketEmail ?? "";
+        this.apiToken = config.bitbucketApiToken ?? "";
     }
 
     async getRepoInfo(repo: string): Promise<RepoInfo> {
         const { workspace, slug } = this.parseRepo(repo);
-        // mcp-bitbucket doesn't have a direct "get repo" tool, use search
-        const rawResult = await this.mcp.callScmTool("bb_search_repositories", {
-            query: `name = "${slug}"`,
-            workspace,
-            pagelen: 1,
-        });
-        const result = parseBitbucketSearchResponse(rawResult);
+        const result = await this.bitbucketJson<{
+            full_name?: string;
+            description?: string | null;
+            mainbranch?: { name?: string };
+        }>(`/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}`);
 
-        const first = result?.values?.[0];
         return {
             name: `${workspace}/${slug}`,
-            defaultBranch: first?.mainbranch?.name ?? "main",
-            description: first?.description ?? "",
+            defaultBranch: result.mainbranch?.name ?? "main",
+            description: result.description ?? "",
         };
     }
 
     async readFile(repo: string, path: string, branch?: string): Promise<string> {
         const { workspace, slug } = this.parseRepo(repo);
-        const args: Record<string, unknown> = {
-            repo_slug: slug,
-            path,
-            workspace,
-        };
-        if (branch) args.branch = branch;
-
-        const rawResult = await this.mcp.callScmTool("bb_read_file", args);
-        const result = parseBitbucketFile(rawResult);
-        if (typeof result === "string") return result;
-        if (result?.content) return result.content;
-        return JSON.stringify(result);
+        const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+        return this.bitbucketText(`/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}/src/${encodeURIComponent(branch ?? "main")}/${encodedPath}`);
     }
 
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async listFiles(_repo: string, _path?: string, _branch?: string): Promise<string[]> {
-        // mcp-bitbucket doesn't have a tree listing tool, return empty
-        log.warn("Bitbucket MCP does not support listing files. Use readFile with known paths.");
-        return [];
+    async listFiles(repo: string, path?: string, branch?: string): Promise<string[]> {
+        const { workspace, slug } = this.parseRepo(repo);
+        if (!this.hasCredentials()) {
+            log.warn("Bitbucket credentials are missing; cannot list files via Bitbucket API.");
+            return [];
+        }
+
+        const ref = encodeURIComponent(branch ?? "main");
+        const rootPath = path ? `/${path.split("/").map(encodeURIComponent).join("/")}` : "/";
+        const url = `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}/src/${ref}${rootPath}?pagelen=100`;
+        return this.listFilesFromApi(url);
     }
 
     async readFiles(repo: string, paths: string[], branch?: string): Promise<ScmFile[]> {
@@ -77,24 +77,33 @@ export class BitbucketProvider implements ScmProvider {
 
     async createBranch(repo: string, branchName: string, baseBranch?: string): Promise<void> {
         const { workspace, slug } = this.parseRepo(repo);
-        await this.mcp.callScmTool("bb_create_branch", {
-            repo_slug: slug,
-            branch: branchName,
-            workspace,
-            start_point: baseBranch ?? "main",
+        const base = baseBranch ?? "main";
+        const branch = await this.bitbucketJson<{ target?: { hash?: string } }>(
+            `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}/refs/branches/${encodeURIComponent(base)}`
+        );
+        const hash = branch.target?.hash;
+        if (!hash) throw new Error(`Could not resolve Bitbucket base branch ${base}`);
+
+        await this.bitbucketJson(`/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}/refs/branches`, {
+            method: "POST",
+            json: {
+                name: branchName,
+                target: { hash },
+            },
         });
         log.info(`Created branch ${branchName}`);
     }
 
     async writeFile(repo: string, path: string, content: string, message: string, branch: string): Promise<void> {
         const { workspace, slug } = this.parseRepo(repo);
-        await this.mcp.callScmTool("bb_write_file", {
-            repo_slug: slug,
-            path,
-            content,
-            branch,
-            message,
-            workspace,
+        const form = new FormData();
+        form.append("branch", branch);
+        form.append("message", message);
+        form.append(path, content);
+        await this.bitbucketJson(`/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}/src`, {
+            method: "POST",
+            body: form,
+            allowEmpty: true,
         });
     }
 
@@ -106,19 +115,79 @@ export class BitbucketProvider implements ScmProvider {
         targetBranch?: string,
     ): Promise<string> {
         const { workspace, slug } = this.parseRepo(repo);
-        const rawResult = await this.mcp.callScmTool("bb_create_pull_request", {
-            repo_slug: slug,
-            title,
-            description: body,
-            source_branch: sourceBranch,
-            destination_branch: targetBranch ?? "main",
-            workspace,
-        });
-        const result = parseBitbucketPullRequest(rawResult);
+        const result = await this.bitbucketJson<{ links?: { html?: { href?: string } }; url?: string }>(
+            `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}/pullrequests`,
+            {
+                method: "POST",
+                json: {
+                    title,
+                    description: body,
+                    source: { branch: { name: sourceBranch } },
+                    destination: { branch: { name: targetBranch ?? "main" } },
+                },
+            }
+        );
 
-        const prUrl = result?.links?.html?.href ?? result?.url ?? "";
+        const prUrl = result.links?.html?.href ?? result.url ?? "";
+        if (!prUrl) {
+            throw new Error("Bitbucket PR was created but no URL was returned");
+        }
         log.info(`Created PR: ${prUrl}`);
         return prUrl;
+    }
+
+    private async bitbucketJson<T = unknown>(
+        path: string,
+        options: { method?: string; json?: unknown; body?: BodyInit; allowEmpty?: boolean } = {},
+    ): Promise<T> {
+        const headers: Record<string, string> = {
+            Authorization: this.authHeader(),
+            Accept: "application/json",
+        };
+        let body = options.body;
+        if (options.json !== undefined) {
+            headers["Content-Type"] = "application/json";
+            body = JSON.stringify(options.json);
+        }
+
+        const response = await fetch(`https://api.bitbucket.org/2.0${path}`, {
+            method: options.method ?? "GET",
+            headers,
+            body,
+        });
+
+        if (!response.ok) {
+            throw new Error(`Bitbucket API failed (${response.status} ${response.statusText}): ${await response.text()}`);
+        }
+        const text = await response.text();
+        if (!text.trim()) {
+            if (options.allowEmpty) return undefined as T;
+            throw new Error(`Bitbucket API returned an empty response for ${path}`);
+        }
+        return JSON.parse(text) as T;
+    }
+
+    private async bitbucketText(path: string): Promise<string> {
+        const response = await fetch(`https://api.bitbucket.org/2.0${path}`, {
+            headers: {
+                Authorization: this.authHeader(),
+                Accept: "text/plain, application/octet-stream, */*",
+            },
+        });
+        if (!response.ok) {
+            throw new Error(`Bitbucket API failed (${response.status} ${response.statusText}): ${await response.text()}`);
+        }
+        return response.text();
+    }
+
+    private authHeader(): string {
+        const user = this.apiToken ? this.email : this.username;
+        const secret = this.apiToken || this.appPassword;
+        return `Basic ${Buffer.from(`${user}:${secret}`).toString("base64")}`;
+    }
+
+    private hasCredentials(): boolean {
+        return Boolean((this.apiToken && this.email) || (this.username && this.appPassword));
     }
 
     private parseRepo(repo: string): { workspace: string; slug: string } {
@@ -131,4 +200,81 @@ export class BitbucketProvider implements ScmProvider {
         }
         throw new Error(`Invalid Bitbucket repo format: ${repo}. Expected: workspace/repo`);
     }
+
+    private async listFilesFromApi(url: string, depth = 0): Promise<string[]> {
+        if (depth > 10) return [];
+
+        const files: string[] = [];
+        let nextUrl: string | undefined = url;
+
+        while (nextUrl) {
+            const response = await fetch(nextUrl, {
+                headers: {
+                    Authorization: this.authHeader(),
+                    Accept: "application/json",
+                },
+            });
+
+            if (!response.ok) {
+                log.warn(`Bitbucket file listing failed (${response.status}): ${response.statusText}`);
+                return files;
+            }
+
+            const page = asBitbucketSourcePage(await response.json());
+            for (const entry of page.values) {
+                if (!entry.path) continue;
+                if (entry.type === "commit_directory") {
+                    files.push(...await this.listFilesFromApi(entry.links?.self?.href ?? `${url.replace(/\?.*$/, "")}/${entry.path}?pagelen=100`, depth + 1));
+                } else if (entry.type === "commit_file") {
+                    files.push(entry.path);
+                }
+            }
+
+            nextUrl = page.next;
+        }
+
+        return [...new Set(files)];
+    }
+}
+
+interface BitbucketSourceEntry {
+    type?: string;
+    path?: string;
+    links?: {
+        self?: {
+            href?: string;
+        };
+    };
+}
+
+interface BitbucketSourcePage {
+    values: BitbucketSourceEntry[];
+    next?: string;
+}
+
+function asBitbucketSourcePage(value: unknown): BitbucketSourcePage {
+    if (!value || typeof value !== "object") return { values: [] };
+    const record = value as Record<string, unknown>;
+    const rawValues = Array.isArray(record.values) ? record.values : [];
+    const values = rawValues
+        .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+        .map((entry) => ({
+            type: typeof entry.type === "string" ? entry.type : undefined,
+            path: typeof entry.path === "string" ? entry.path : undefined,
+            links: parseLinks(entry.links),
+        }));
+
+    return {
+        values,
+        next: typeof record.next === "string" ? record.next : undefined,
+    };
+}
+
+function parseLinks(value: unknown): BitbucketSourceEntry["links"] {
+    if (!value || typeof value !== "object") return undefined;
+    const links = value as Record<string, unknown>;
+    const self = links.self;
+    if (!self || typeof self !== "object") return undefined;
+    const href = (self as Record<string, unknown>).href;
+    return typeof href === "string" ? { self: { href } } : undefined;
 }

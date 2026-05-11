@@ -32,6 +32,8 @@ const configSchema = z.object({
     // Bitbucket
     bitbucketUsername: z.string().optional(),
     bitbucketAppPassword: z.string().optional(),
+    bitbucketEmail: z.string().optional(),
+    bitbucketApiToken: z.string().optional(),
     bitbucketWorkspace: z.string().optional(),
 
     // AI
@@ -143,6 +145,8 @@ export function loadConfig(): Config {
         gitlabUrl: process.env.GITLAB_URL ?? "https://gitlab.com",
         bitbucketUsername: process.env.BITBUCKET_USERNAME || undefined,
         bitbucketAppPassword: process.env.BITBUCKET_APP_PASSWORD || undefined,
+        bitbucketEmail: process.env.BITBUCKET_EMAIL || undefined,
+        bitbucketApiToken: process.env.BITBUCKET_API_TOKEN || undefined,
         bitbucketWorkspace: process.env.BITBUCKET_WORKSPACE || undefined,
 
         // AI
