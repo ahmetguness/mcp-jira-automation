@@ -13,10 +13,8 @@
     "test": "vitest run",
     "test:report": "vitest run > test-results.txt 2>&1",
     "lint": "eslint src/",
-    "mja": "node scripts/run.js all",
-    "mja:run": "node scripts/run.js all",
-    "mja:mcp": "node scripts/run.js mcp",
-    "mja:app": "node scripts/run.js app"
+    "mja": "tsx scripts/run.ts app",
+    "mja:app": "tsx scripts/run.ts app"
   },
   "keywords": [
     "jira",
@@ -48,7 +46,6 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "boxen": "^8.0.1",
     "chalk": "^5.6.2",
     "dockerode": "^4.0.9",
     "dotenv": "^17.3.1",

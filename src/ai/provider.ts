@@ -3,7 +3,7 @@
  */
 
 import type { TaskContext, AiAnalysis } from "../types.js";
-import { getBasePrompt } from "./prompts/basePrompt.js";
+import { loadSystemPrompt, getPromptSource } from "./prompts/loader.js";
 import { getOverlayPrompt } from "./prompts/overlays.js";
 import { createLogger } from "../logger.js";
 
@@ -75,14 +75,28 @@ export interface AiProvider {
 // - The system will auto-detect from marker files; this is a fallback hint`;
 // }
 
-export function buildSystemPrompt(options: { primaryLanguage?: string; isMulti?: boolean } = {}): string {
-  const { primaryLanguage } = options;
-  let prompt = getBasePrompt();
+export function buildSystemPrompt(options: { primaryLanguage?: string; isMulti?: boolean; promptOverlay?: string } = {}): string {
+  const { primaryLanguage, promptOverlay } = options;
+  const log = createLogger("ai:provider");
+
+  let prompt = loadSystemPrompt();
+
+  // Log prompt source on first call (cache handles repeated calls)
+  log.debug(`System prompt source: ${getPromptSource()}`);
 
   // Add source-code context overlay (helps AI understand the repo's language)
-  // Tests are always Node.js regardless (see basePrompt)
   const lang = primaryLanguage && primaryLanguage !== "unknown" ? primaryLanguage : "unknown";
   prompt += "\n\n" + getOverlayPrompt(lang);
+
+  // Append per-issue prompt overlay from Jira description [PROMPT]...[/PROMPT]
+  if (promptOverlay?.trim()) {
+    prompt += "\n\n================================================================================\n";
+    prompt += "ISSUE-SPECIFIC INSTRUCTIONS (from Jira description)\n";
+    prompt += "================================================================================\n";
+    prompt += promptOverlay.trim();
+    prompt += "\n================================================================================";
+    log.debug(`Appended issue-specific prompt overlay (${promptOverlay.trim().length} chars)`);
+  }
 
   return prompt;
 }
@@ -212,6 +226,49 @@ export function buildUserPrompt(context: TaskContext): string {
   }
 
   return prompt;
+}
+
+/**
+ * Retry wrapper for AI provider calls.
+ * Retries on transient errors (rate limit, timeout, network) with exponential backoff.
+ * Does NOT retry on parse errors or permanent failures.
+ */
+export async function withAiRetry<T>(
+    fn: () => Promise<T>,
+    opts: { maxAttempts?: number; label?: string } = {},
+): Promise<T> {
+    const log = createLogger("ai:retry");
+    const maxAttempts = opts.maxAttempts ?? 3;
+    const label = opts.label ?? "AI call";
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const isTransient =
+                msg.includes("rate limit") ||
+                msg.includes("429") ||
+                msg.includes("timeout") ||
+                msg.includes("ETIMEDOUT") ||
+                msg.includes("ECONNRESET") ||
+                msg.includes("ECONNREFUSED") ||
+                msg.includes("503") ||
+                msg.includes("502") ||
+                msg.includes("overloaded");
+
+            if (!isTransient || attempt === maxAttempts) {
+                throw err;
+            }
+
+            const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 30_000); // 1s, 2s, 4s... max 30s
+            log.warn(`${label} failed (attempt ${attempt}/${maxAttempts}): ${msg}. Retrying in ${delayMs}ms...`);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+
+    // TypeScript requires this but it's unreachable
+    throw new Error(`${label} failed after ${maxAttempts} attempts`);
 }
 
 /** Parse AI response into AiAnalysis */

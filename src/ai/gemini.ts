@@ -4,7 +4,7 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { AiProvider } from "./provider.js";
-import { buildSystemPrompt, buildUserPrompt, parseAiResponse, fixRouterDetection } from "./provider.js";
+import { buildSystemPrompt, buildUserPrompt, parseAiResponse, fixRouterDetection, withAiRetry } from "./provider.js";
 import type { TaskContext, AiAnalysis } from "../types.js";
 import type { Config } from "../config.js";
 import { createLogger, withTiming } from "../logger.js";
@@ -25,19 +25,21 @@ export class GeminiProvider implements AiProvider {
     async analyze(context: TaskContext): Promise<AiAnalysis> {
         log.info(`Analyzing issue ${context.issue.key}...`);
 
-        const { result, duration_ms } = await withTiming(async () => {
-            const model = this.genAI.getGenerativeModel({
-                model: this.model,
-                systemInstruction: buildSystemPrompt({ primaryLanguage: context.runtime, isMulti: context.hasMultipleLanguages }),
-                generationConfig: {
-                    temperature: 0.1,
-                    responseMimeType: "application/json",
-                },
-            });
+        const { result, duration_ms } = await withTiming(() =>
+            withAiRetry(async () => {
+                const model = this.genAI.getGenerativeModel({
+                    model: this.model,
+                    systemInstruction: buildSystemPrompt({ primaryLanguage: context.runtime, isMulti: context.hasMultipleLanguages, promptOverlay: context.promptOverlay }),
+                    generationConfig: {
+                        temperature: 0.1,
+                        responseMimeType: "application/json",
+                    },
+                });
 
-            const response = await model.generateContent(buildUserPrompt(context));
-            return response.response.text();
-        });
+                const response = await model.generateContent(buildUserPrompt(context));
+                return response.response.text();
+            }, { label: `Gemini ${this.model} / ${context.issue.key}` })
+        );
 
         log.timed("info", `AI analysis complete for ${context.issue.key}`, duration_ms);
         const analysis = parseAiResponse(result);

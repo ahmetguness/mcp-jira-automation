@@ -27,6 +27,7 @@ export class JiraClient {
         const rawResult = await this.mcp.callJiraTool("jira_search", {
             jql,
             limit,
+            fields: "summary,status,assignee,issuetype,description,customfield_10103",
         });
 
         log.debug(`Raw jira_search response: ${JSON.stringify(rawResult).slice(0, 500)}`);

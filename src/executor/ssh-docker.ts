@@ -33,6 +33,8 @@ export class SshDockerExecutor implements CommandExecutor {
     private cleanupWorkspace: boolean;
     private removeImage: boolean;
     private containerTestEnv: Record<string, string>;
+    /** ControlMaster socket path for SSH connection multiplexing */
+    private controlPath: string;
 
     constructor(config: Config) {
         if (!config.sshHost || !config.sshUser) {
@@ -50,6 +52,8 @@ export class SshDockerExecutor implements CommandExecutor {
         this.cleanupWorkspace = config.sshCleanupWorkspace;
         this.removeImage = config.sshRemoveImage;
         this.containerTestEnv = parseContainerTestEnv(config.containerTestEnv);
+        // Use OS temp dir for control socket — unique per executor instance
+        this.controlPath = `/tmp/mcp-ssh-ctl-${this.user}-${this.host}-${this.port}-${process.pid}`;
 
         log.debug(`SSH Docker executor initialized (${this.user}@${this.host}:${this.port}, workdir: ${this.remoteWorkdir})`);
     }
@@ -81,6 +85,11 @@ export class SshDockerExecutor implements CommandExecutor {
         const containerName = `mcp-ssh-${runId}`;
         let imageName = this.configImage === "auto" ? "node:20-bookworm" : this.configImage;
         const output: string[] = [];
+
+        // Open a persistent SSH ControlMaster connection for this run
+        // ControlMaster is only supported on Linux/macOS — skip on Windows
+        const useControlMaster = process.platform !== "win32";
+        if (useControlMaster) await this.openControlMaster();
 
         try {
             log.info(`Creating remote workspace ${remoteRoot}`);
@@ -179,6 +188,7 @@ export class SshDockerExecutor implements CommandExecutor {
             };
         } finally {
             await this.cleanup(remoteRoot, containerName, imageName);
+            if (process.platform !== "win32") await this.closeControlMaster();
         }
     }
 
@@ -307,8 +317,51 @@ export class SshDockerExecutor implements CommandExecutor {
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", `ConnectTimeout=${this.connectTimeoutSec}`,
         ];
+        // ControlMaster multiplexing is only supported on Linux/macOS
+        if (process.platform !== "win32") {
+            args.push(
+                "-o", `ControlPath=${this.controlPath}`,
+                "-o", "ControlMaster=auto",
+            );
+        }
         if (this.privateKeyPath) args.push("-i", this.privateKeyPath);
         return args;
+    }
+
+    /** Open a persistent ControlMaster connection to reuse across SSH calls */
+    private async openControlMaster(): Promise<void> {
+        const args = [
+            "-p", String(this.port),
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", `ConnectTimeout=${this.connectTimeoutSec}`,
+            "-o", `ControlPath=${this.controlPath}`,
+            "-o", "ControlMaster=yes",
+            "-o", "ControlPersist=60",  // keep alive 60s after last use
+            "-N",  // don't execute a command, just open the tunnel
+        ];
+        if (this.privateKeyPath) args.push("-i", this.privateKeyPath);
+        args.push(this.target);
+
+        // Fire-and-forget: the process stays alive in background
+        // We give it 5s to establish; if it fails, subsequent ssh calls fall back to normal
+        const result = await runProcess("ssh", args, 5_000);
+        if (result.exitCode !== 0 && result.exitCode !== null) {
+            log.debug(`ControlMaster setup returned ${result.exitCode} — subsequent calls will use direct connections`);
+        } else {
+            log.debug(`SSH ControlMaster established (${this.controlPath})`);
+        }
+    }
+
+    /** Close the ControlMaster connection */
+    private async closeControlMaster(): Promise<void> {
+        const args = [
+            "-p", String(this.port),
+            "-o", `ControlPath=${this.controlPath}`,
+            "-O", "exit",
+            this.target,
+        ];
+        await runProcess("ssh", args, 5_000).catch(() => undefined);
     }
 
     private get target(): string {

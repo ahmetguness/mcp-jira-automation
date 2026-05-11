@@ -4,7 +4,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { AiProvider } from "./provider.js";
-import { buildSystemPrompt, buildUserPrompt, parseAiResponse, fixRouterDetection } from "./provider.js";
+import { buildSystemPrompt, buildUserPrompt, parseAiResponse, fixRouterDetection, withAiRetry } from "./provider.js";
 import type { TaskContext, AiAnalysis } from "../types.js";
 import type { Config } from "../config.js";
 import { createLogger, withTiming } from "../logger.js";
@@ -25,20 +25,22 @@ export class AnthropicProvider implements AiProvider {
     async analyze(context: TaskContext): Promise<AiAnalysis> {
         log.info(`Analyzing issue ${context.issue.key}...`);
 
-        const { result, duration_ms } = await withTiming(async () => {
-            const response = await this.client.messages.create({
-                model: this.model,
-                max_tokens: 8192,
-                system: buildSystemPrompt({ primaryLanguage: context.runtime, isMulti: context.hasMultipleLanguages }),
-                messages: [
-                    { role: "user", content: buildUserPrompt(context) },
-                ],
-                temperature: 0.1,
-            });
+        const { result, duration_ms } = await withTiming(() =>
+            withAiRetry(async () => {
+                const response = await this.client.messages.create({
+                    model: this.model,
+                    max_tokens: 8192,
+                    system: buildSystemPrompt({ primaryLanguage: context.runtime, isMulti: context.hasMultipleLanguages, promptOverlay: context.promptOverlay }),
+                    messages: [
+                        { role: "user", content: buildUserPrompt(context) },
+                    ],
+                    temperature: 0.1,
+                });
 
-            const textBlock = response.content.find((b) => b.type === "text");
-            return textBlock?.type === "text" ? textBlock.text : "";
-        });
+                const textBlock = response.content.find((b) => b.type === "text");
+                return textBlock?.type === "text" ? textBlock.text : "";
+            }, { label: `Anthropic ${this.model} / ${context.issue.key}` })
+        );
 
         log.timed("info", `AI analysis complete for ${context.issue.key}`, duration_ms);
         const analysis = parseAiResponse(result);

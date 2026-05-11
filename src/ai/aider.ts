@@ -371,6 +371,13 @@ def setup_auth():
         prompt += `Write SEPARATE test functions for each scenario (happy path, not found, invalid auth). Do NOT use a generic test_endpoint() wrapper — write explicit test functions like test_drivers_happy_path(), test_drivers_not_found(), test_drivers_invalid_auth().\n`;
         prompt += `Write the complete ${testFileName} file now. Do not ask questions.\n`;
 
+        // Append per-issue prompt overlay from Jira description [PROMPT]...[/PROMPT]
+        if (context.promptOverlay?.trim()) {
+            prompt += `\n## ISSUE-SPECIFIC INSTRUCTIONS (from Jira description)\n`;
+            prompt += context.promptOverlay.trim();
+            prompt += `\n`;
+        }
+
         return prompt;
     }
 

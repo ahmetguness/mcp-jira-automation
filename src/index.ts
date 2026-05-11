@@ -4,7 +4,7 @@
 
 import "./ensureUtf8.js";
 import "dotenv/config";
-import { loadConfig } from "./config.js";
+import { loadConfig, printConfigLogs } from "./config.js";
 import { App } from "./app.js";
 import { createLogger } from "./logger.js";
 import { printStartupBanner } from "./ui/startupBanner.js";
@@ -15,6 +15,7 @@ async function main(): Promise<void> {
     try {
         const config = loadConfig();
         printStartupBanner(config);
+        printConfigLogs();
         const app = new App(config);
         await app.start();
     } catch (e: unknown) {

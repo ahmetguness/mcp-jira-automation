@@ -76,7 +76,8 @@ const configSchema = z.object({
     // Webhook security
     webhookSecret: z.string().optional(),
 
-    // MCP server paths
+    // MCP server connection
+    mcpTransport: z.enum(["sse", "streamable-http"]).default("sse"),
     mcpAtlassianUrl: z.string().default("http://127.0.0.1:9000/sse"),
 
     // PR & Branch
@@ -190,7 +191,8 @@ export function loadConfig(): Config {
         webhookSecret: process.env.WEBHOOK_SECRET || undefined,
 
         // MCP
-        mcpAtlassianUrl: process.env.MCP_SSE_URL ?? "http://127.0.0.1:9000/sse",
+        mcpTransport: process.env.MCP_TRANSPORT ?? (process.env.MCP_URL ? "streamable-http" : "sse"),
+        mcpAtlassianUrl: process.env.MCP_URL ?? process.env.MCP_SSE_URL ?? "http://127.0.0.1:9000/sse",
 
         // PR
         requireApproval: (process.env.REQUIRE_APPROVAL ?? "false").toLowerCase() === "true",
@@ -211,31 +213,35 @@ export function loadConfig(): Config {
         throw new Error(`Invalid configuration: ${errors}`);
     }
 
-    auditSecrets(result.data);
-
-    // Warn if remote mode is active but no API_BASE_URL is configured
+    // Defer config logs until after banner — emitted by printConfigLogs()
+    _pendingConfigLogs = [];
+    const secrets: [string, string | undefined][] = [
+        ["JIRA_API_TOKEN", result.data.jiraApiToken],
+        ["GITHUB_TOKEN", result.data.githubToken],
+        ["OPENAI_API_KEY", result.data.openaiApiKey],
+        ["ANTHROPIC_API_KEY", result.data.anthropicApiKey],
+        ["GEMINI_API_KEY", result.data.geminiApiKey],
+    ];
+    const set = secrets.filter(([, v]) => v).map(([n]) => n);
+    const unset = secrets.filter(([, v]) => !v).map(([n]) => n);
+    _pendingConfigLogs.push({ level: "info", msg: `Secrets: ${set.join(', ')} ✓${unset.length ? ` | not set: ${unset.join(', ')}` : ''}` });
     if (result.data.executionMode === "remote" && !result.data.apiBaseUrl) {
-        log.warn("EXECUTION_MODE=remote but API_BASE_URL is not set. Tests will fail unless base_url is provided in the Jira task description.");
+        _pendingConfigLogs.push({ level: "warn", msg: "EXECUTION_MODE=remote but API_BASE_URL is not set. Tests will fail unless base_url is provided in the Jira task description." });
     }
 
     return result.data;
 }
 
-/** Log secret presence (set/unset) — values are NEVER logged */
-function auditSecrets(config: Config): void {
-    const secrets: [string, string | undefined][] = [
-        ["JIRA_API_TOKEN", config.jiraApiToken],
-        ["GITHUB_TOKEN", config.githubToken],
-        ["OPENAI_API_KEY", config.openaiApiKey],
-        ["ANTHROPIC_API_KEY", config.anthropicApiKey],
-        ["GEMINI_API_KEY", config.geminiApiKey],
-    ];
-    const set = secrets.filter(([, v]) => v).map(([n]) => n);
-    const unset = secrets.filter(([, v]) => !v).map(([n]) => n);
-    log.info(`Secrets: ${set.join(', ')} ✓${unset.length ? ` | not set: ${unset.join(', ')}` : ''}`);
-}
+let _pendingConfigLogs: { level: "info" | "warn"; msg: string }[] = [];
 
-// ─── Helpers ─────────────────────────────────────────────────
+/** Emit config logs deferred until after the banner is printed */
+export function printConfigLogs(): void {
+    for (const entry of _pendingConfigLogs) {
+        if (entry.level === "warn") log.warn(entry.msg);
+        else log.info(entry.msg);
+    }
+    _pendingConfigLogs = [];
+}
 
 /** Build the JQL query for fetching bot-assigned issues */
 export function buildBotJql(config: Config): string {

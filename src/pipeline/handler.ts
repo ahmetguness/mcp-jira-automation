@@ -100,6 +100,14 @@ export class PipelineHandler {
             const { result: context, duration_ms: contextMs } = await withTiming(() =>
                 buildTaskContext(issue, this.scm, repo),
             );
+
+            // Extract per-issue prompt overlay from Jira description
+            const promptOverlay = extractPromptOverlay(issue.description);
+            if (promptOverlay) {
+                context.promptOverlay = promptOverlay;
+                log.info(`📝 Issue-specific prompt overlay found (${promptOverlay.length} chars)`, { issueKey: issue.key });
+            }
+
             log.timed("info", `✅ Context: ${context.sourceFiles.length} source + ${context.testFiles.length} test files (${(contextMs / 1000).toFixed(1)}s)`, contextMs, {
                 issueKey: issue.key,
                 step: "context",
@@ -551,6 +559,25 @@ function extractBaseUrlFromReadme(sourceFiles: ScmFile[]): string | undefined {
     }
 
     return undefined;
+}
+
+/**
+ * Extract per-issue prompt overlay from Jira description.
+ * Parses [PROMPT]...[/PROMPT] block and returns the content inside.
+ * Returns undefined if no block found.
+ *
+ * Example in Jira description:
+ *   [PROMPT]
+ *   Only test the /auth endpoints. Skip all other routes.
+ *   Use Turkish language in test comments.
+ *   [/PROMPT]
+ */
+function extractPromptOverlay(description: string): string | undefined {
+    if (!description) return undefined;
+    const match = description.match(/\[PROMPT\]([\s\S]*?)\[\/PROMPT\]/i);
+    if (!match?.[1]) return undefined;
+    const content = match[1].trim();
+    return content.length > 0 ? content : undefined;
 }
 
 /** Check if test output contains network-related errors worth retrying */

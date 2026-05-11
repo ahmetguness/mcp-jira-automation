@@ -203,7 +203,7 @@ async function readFilesLimited(
 ): Promise<ScmFile[]> {
     const files: ScmFile[] = [];
     const total = paths.length;
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 15;
 
     for (let batchStart = 0; batchStart < total; batchStart += BATCH_SIZE) {
         const batch = paths.slice(batchStart, batchStart + BATCH_SIZE);

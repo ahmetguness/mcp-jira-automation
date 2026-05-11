@@ -103,7 +103,16 @@ export class McpManager {
     /** Call a tool on a specific MCP server */
     async callTool(connection: McpConnection, name: string, args: Record<string, unknown>): Promise<unknown> {
         if (name !== 'get_file_contents') {
-            log.debug(`Calling ${connection.name}/${name}`, args);
+            // Truncate large string values (e.g. body, jql) to keep logs readable
+            const logArgs: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(args)) {
+                if (typeof v === "string" && v.length > 120) {
+                    logArgs[k] = v.slice(0, 120) + "…";
+                } else {
+                    logArgs[k] = v;
+                }
+            }
+            log.debug(`Calling ${connection.name}/${name}`, logArgs);
         }
 
         const result = await connection.client.callTool({ name, arguments: args });

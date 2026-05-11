@@ -58,8 +58,50 @@ export class BitbucketProvider implements ScmProvider {
 
         const ref = encodeURIComponent(branch ?? "main");
         const rootPath = path ? `/${path.split("/").map(encodeURIComponent).join("/")}` : "/";
-        const url = `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}/src/${ref}${rootPath}?pagelen=100`;
-        return this.listFilesFromApi(url);
+        const baseUrl = `https://api.bitbucket.org/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(slug)}/src/${ref}${rootPath}`;
+
+        // Try flat listing first: max_depth=10 returns all files in one paginated request
+        const flatUrl = `${baseUrl}?pagelen=100&max_depth=10`;
+        const flatFiles = await this.listFilesFlat(flatUrl);
+        if (flatFiles.length > 0) {
+            log.debug(`Bitbucket flat listing: ${flatFiles.length} files`);
+            return flatFiles;
+        }
+
+        // Fallback to recursive traversal if flat listing returns nothing
+        log.debug("Bitbucket flat listing returned 0 files, falling back to recursive traversal");
+        return this.listFilesFromApi(`${baseUrl}?pagelen=100`);
+    }
+
+    /** Flat file listing using max_depth — paginated, no recursion needed */
+    private async listFilesFlat(url: string): Promise<string[]> {
+        const files: string[] = [];
+        let nextUrl: string | undefined = url;
+
+        while (nextUrl) {
+            const response = await fetch(nextUrl, {
+                headers: {
+                    Authorization: this.authHeader(),
+                    Accept: "application/json",
+                },
+            });
+
+            if (!response.ok) {
+                log.debug(`Bitbucket flat listing failed (${response.status}) — will fall back to recursive`);
+                return [];
+            }
+
+            const page = asBitbucketSourcePage(await response.json());
+            for (const entry of page.values) {
+                // Only collect files, skip directories
+                if (entry.path && entry.type === "commit_file") {
+                    files.push(entry.path);
+                }
+            }
+            nextUrl = page.next;
+        }
+
+        return [...new Set(files)];
     }
 
     async readFiles(repo: string, paths: string[], branch?: string): Promise<ScmFile[]> {

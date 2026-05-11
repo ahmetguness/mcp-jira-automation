@@ -18,6 +18,8 @@ export class StateStore {
     private filePath: string;
     private data: StateData;
     private lockTimeoutMs = 5 * 60 * 1000; // 5 minutes
+    private saveTimer: ReturnType<typeof setTimeout> | null = null;
+    private readonly DEBOUNCE_MS = 200;
 
     constructor(filePath: string) {
         this.filePath = filePath;
@@ -45,6 +47,24 @@ export class StateStore {
         const tmpPath = this.filePath + ".tmp";
         writeFileSync(tmpPath, JSON.stringify(this.data, null, 2), "utf-8");
         renameSync(tmpPath, this.filePath);
+    }
+
+    /** Schedule a debounced save — coalesces rapid successive writes into one disk I/O */
+    private scheduleSave(): void {
+        if (this.saveTimer) clearTimeout(this.saveTimer);
+        this.saveTimer = setTimeout(() => {
+            this.saveTimer = null;
+            this.save();
+        }, this.DEBOUNCE_MS);
+    }
+
+    /** Force an immediate save, bypassing debounce — use for critical state transitions */
+    private saveNow(): void {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+        }
+        this.save();
     }
 
     /** Get state for an issue, or null if never processed */
@@ -105,7 +125,8 @@ export class StateStore {
             lockedAt: new Date().toISOString(),
             nextRetryAt: existing?.nextRetryAt ?? null,
         };
-        this.save();
+        // Lock acquisition is critical — save immediately so other processes see it
+        this.saveNow();
         log.debug(`Locked ${issueKey} (attempt ${this.data.issues[issueKey]?.attemptCount})`);
         return true;
     }
@@ -122,7 +143,8 @@ export class StateStore {
             lastProcessedAt: new Date().toISOString(),
             lockedAt: null, // Release lock
         };
-        this.save();
+        // Debounce non-critical updates — multiple rapid updates coalesce into one write
+        this.scheduleSave();
         log.debug(`${issueKey} → ${status}`);
     }
 

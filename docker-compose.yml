@@ -1,18 +1,20 @@
 version: "3.8"
 
 services:
-  # mcp-atlassian (Jira + Confluence MCP server)
+  # mcp-atlassian (Jira MCP server)
   mcp-atlassian:
-    image: ghcr.io/sooperset/mcp-atlassian:latest
-    command: --transport sse --port 9000 -vv
+    image: ghcr.io/sooperset/mcp-atlassian:v0.21.1
+    command: --transport streamable-http --host 0.0.0.0 --port 9000 --path /mcp
     ports:
       - "9000:9000"
     env_file:
-      - .env
-    environment:
-      - JIRA_URL=${JIRA_BASE_URL}
-      - JIRA_USERNAME=${JIRA_EMAIL}
-      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+      - mcp-atlassian.env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/healthz')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # Docker Socket Proxy — only whitelisted API endpoints exposed
@@ -45,7 +47,8 @@ services:
     env_file:
       - .env
     environment:
-      - MCP_SSE_URL=http://mcp-atlassian:9000/sse
+      - MCP_TRANSPORT=streamable-http
+      - MCP_URL=http://mcp-atlassian:9000/mcp
       - DOCKER_HOST=tcp://docker-socket-proxy:2375
     user: "1000:1000"
     read_only: true
@@ -64,7 +67,7 @@ services:
       docker-socket-proxy:
         condition: service_healthy
       mcp-atlassian:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

@@ -45,6 +45,12 @@ export interface TaskContext {
     workdir?: string;
     /** Relative path from repo root to working directory (e.g., "backend" for monorepos) */
     workdirRelative?: string;
+    /**
+     * Per-issue prompt overlay extracted from Jira description.
+     * Parsed from [PROMPT]...[/PROMPT] block in the issue description.
+     * Appended to the system prompt before sending to AI.
+     */
+    promptOverlay?: string;
 }
 
 // ─── AI ──────────────────────────────────────────────────────

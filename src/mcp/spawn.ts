@@ -5,6 +5,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Config } from "../config.js";
 import { createLogger } from "../logger.js";
 
@@ -12,16 +13,19 @@ const log = createLogger("mcp:spawn");
 
 export interface McpConnection {
     client: Client;
-    transport: SSEClientTransport | StdioClientTransport;
+    transport: SSEClientTransport | StreamableHTTPClientTransport | StdioClientTransport;
     name: string;
 }
 
-/** Connect to mcp-atlassian via SSE (already running externally) */
+/** Connect to a running mcp-atlassian server. */
 export async function connectJiraMcp(config: Config): Promise<McpConnection> {
-    const transport = new SSEClientTransport(new URL(config.mcpAtlassianUrl));
+    const url = new URL(config.mcpAtlassianUrl);
+    const transport = config.mcpTransport === "streamable-http"
+        ? new StreamableHTTPClientTransport(url)
+        : new SSEClientTransport(url);
     const client = new Client({ name: "mcp-jira-automation", version: "1.0.0" });
     await client.connect(transport);
-    log.info("mcp-atlassian connected ✅");
+    log.info(`mcp-atlassian connected (${config.mcpTransport}, ${url.toString()})`);
     return { client, transport, name: "mcp-atlassian" };
 }
 
