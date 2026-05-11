@@ -249,6 +249,13 @@ AIDER_PATH=aider
 OPENAI_API_KEY=sk-...
 ```
 
+`aider` is treated as an external CLI dependency. Keep it outside this repository:
+
+- Use `AIDER_PATH=aider` when the command is available on `PATH`.
+- Or set `AIDER_PATH` to an absolute executable path outside the project directory.
+- Project-local paths such as `./aider`, `.venv/.../aider`, or `node_modules/.bin/aider` are rejected.
+- The Docker runner image does not install Aider. If you run with `AI_PROVIDER=aider` in Docker, provide Aider from outside the project through your runtime image or host/container environment and set `AIDER_PATH` accordingly.
+
 ## Configuration Reference
 
 ### Application Environment

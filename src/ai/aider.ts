@@ -20,6 +20,37 @@ import { createLogger, withTiming } from "../logger.js";
 const log = createLogger("ai:aider");
 const execFileAsync = promisify(execFile);
 
+export function validateExternalAiderPath(aiderPath: string, projectRoot = process.cwd()): string {
+    const trimmed = aiderPath.trim();
+    if (!trimmed) {
+        throw new Error("AIDER_PATH cannot be empty when AI_PROVIDER=aider");
+    }
+
+    const hasPathSeparator = /[\\/]/.test(trimmed);
+    if (!hasPathSeparator && !path.isAbsolute(trimmed)) {
+        return trimmed;
+    }
+
+    if (!path.isAbsolute(trimmed)) {
+        throw new Error(
+            `AIDER_PATH must be a command on PATH or an absolute path outside the project root. Relative project paths are not allowed: ${trimmed}`,
+        );
+    }
+
+    const root = path.resolve(projectRoot);
+    const resolved = path.resolve(trimmed);
+    const relative = path.relative(root, resolved);
+    const isInsideProject = relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+
+    if (isInsideProject) {
+        throw new Error(
+            `AIDER_PATH must point outside the project root. Refusing project-local Aider executable: ${resolved}`,
+        );
+    }
+
+    return trimmed;
+}
+
 export class AiderProvider implements AiProvider {
     private aiderPath: string;
     private model: string;
@@ -30,7 +61,7 @@ export class AiderProvider implements AiProvider {
     private vllmBaseUrl?: string;
 
     constructor(config: Config) {
-        this.aiderPath = config.aiderPath ?? "aider";
+        this.aiderPath = validateExternalAiderPath(config.aiderPath ?? "aider");
         this.model = config.aiderModel ?? config.aiModel ?? "gpt-4o";
         // Aider needs more time than direct API calls (repo map + AI call + file writes)
         // Use at least 5 minutes, regardless of EXEC_TIMEOUT_MS
