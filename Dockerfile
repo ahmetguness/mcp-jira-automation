@@ -13,7 +13,7 @@ FROM node:20-slim
 WORKDIR /app
 
 # Docker CLI (for spawning executor containers)
-RUN apt-get update && apt-get install -y --no-install-recommends docker.io git && \
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io git openssh-client && \
     rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./

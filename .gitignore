@@ -19,3 +19,5 @@ vitest-err.json
 # Prevent compiled JavaScript files in source directory
 src/**/*.js
 src/**/*.js.map
+
+.env.ln
