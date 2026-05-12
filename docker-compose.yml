@@ -47,8 +47,7 @@ services:
     environment:
       - MCP_TRANSPORT=streamable-http
       - MCP_URL=http://mcp-atlassian:9000/mcp
-      - EXECUTOR_BACKEND=local
-      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      - EXECUTOR_BACKEND=ssh
       # Container-safe overrides for values that are often Windows/local in .env.
       - AIDER_PATH=aider
       - STATE_FILE=/app/data/state.json
@@ -60,6 +59,7 @@ services:
       - /tmp:size=100M
     volumes:
       - runner-data:/app/data
+      - /home/ag/.ssh/gunes_vm_ed25519:/tmp/ssh/gunes_vm_ed25519:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -68,8 +68,6 @@ services:
     mem_limit: 1g
     cpus: "1.0"
     depends_on:
-      docker-socket-proxy:
-        condition: service_healthy
       mcp-atlassian:
         condition: service_healthy
     restart: unless-stopped
