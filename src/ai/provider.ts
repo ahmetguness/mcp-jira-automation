@@ -291,9 +291,10 @@ export function parseAiResponse(text: string): AiAnalysis {
     const log = createLogger("ai:provider");
     log.warn(`AI response JSON parse failed: ${e instanceof Error ? e.message : String(e)}. Response (first 500 chars): ${text.slice(0, 500)}`);
 
-    // Return a result that signals the failure clearly
+    // Keep the raw text as the summary so callers can report the model response
+    // without inventing edits or commands from malformed JSON.
     return {
-      summary: `[AI PARSE ERROR] Could not parse AI response as JSON. Raw response: ${text.slice(0, 200)}`,
+      summary: text,
       plan: "",
       patches: [],
       commands: [],

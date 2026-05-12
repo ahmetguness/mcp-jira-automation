@@ -83,7 +83,7 @@ export function formatJiraReport(result: PipelineResult, options?: { apiBaseUrl?
 
         // Condensed output — only show test-relevant lines, not full HTTP bodies
         if (result.execution.stdout) {
-            const condensed = condenseTestOutput(result.execution.stdout);
+            const condensed = condenseTestOutput(result.execution.stdout) || result.execution.stdout.trim().slice(0, 3000);
             if (condensed) {
                 report += `*Output (condensed):*\n{code}\n${condensed}\n{code}\n\n`;
             }

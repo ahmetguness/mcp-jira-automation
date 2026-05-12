@@ -1,0 +1,28 @@
+.git
+.github
+.vscode
+node_modules
+dist
+data
+.venv*
+
+# Local secrets and machine-specific env files are runtime inputs, not image inputs.
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+
+# Logs and transient outputs
+*.log
+out.txt
+*.out.txt
+test_output*.txt
+test-results.txt
+tsc-errors.txt
+vitest-err.json
+
+# Local notes/editor artifacts
+BASIT_KULLANIM.md
+.kiro
+notes.txt

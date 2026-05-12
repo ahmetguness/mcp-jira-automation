@@ -6,31 +6,34 @@ describe("Config Utilities", () => {
     // ── buildBotJql ──────────────────────────────────────
 
     describe("buildBotJql", () => {
-        it("should return JQL override if provided", () => {
+        it("should scope JQL override to the configured bot assignee", () => {
             const config = {
-                jqlOverride: "assignee = 'custom' ORDER BY created",
+                jiraBotDisplayName: "AI Cyber Bot",
+                jiraAssigneeJql: "ahmetgunes.ceng@gmail.com",
+                jqlOverride: 'project = KAN AND "Repository" is not EMPTY ORDER BY created DESC',
             } as Config;
 
             const jql = buildBotJql(config);
-            expect(jql).toBe("assignee = 'custom' ORDER BY created");
+            expect(jql).toBe('assignee = "ahmetgunes.ceng@gmail.com" AND (project = KAN AND "Repository" is not EMPTY) ORDER BY created DESC');
         });
 
         it("should build default JQL with bot display name", () => {
             const config = {
                 jiraBotDisplayName: "AI Cyber Bot",
+                jiraAssigneeJql: "bot@test.com",
                 jqlOverride: undefined,
             } as Config;
 
             const jql = buildBotJql(config);
-            expect(jql).toContain('assignee = "AI Cyber Bot"');
+            expect(jql).toContain('assignee = "bot@test.com"');
             expect(jql).toContain("statusCategory != Done");
             expect(jql).toContain("ai-failed");
             expect(jql).toContain("ORDER BY created DESC");
         });
 
-        it("should use custom bot display name in default JQL", () => {
+        it("should allow an explicit assignee JQL value", () => {
             const config = {
-                jiraBotDisplayName: "My Custom Bot",
+                jiraAssigneeJql: "My Custom Bot",
                 jqlOverride: undefined,
             } as Config;
 

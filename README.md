@@ -102,9 +102,25 @@ mja app
 mja help
 ```
 
+## Docker
+
+Build and start the full local stack with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+The compose stack starts:
+
+- `mcp-atlassian` on port `9000`
+- a restricted Docker socket proxy for executor containers
+- the `runner` service for this application
+
+The runner reads `.env` at runtime, while `mcp-atlassian` reads `mcp-atlassian.env`. Container-specific values are overridden in `docker-compose.yml`. This keeps local Windows values such as `AIDER_PATH=C:\Users\...\aider.exe` from leaking into the Linux container; the Docker image installs Aider and uses `AIDER_PATH=aider`.
+
 ## Jira Workflow
 
-The service polls Jira with a JQL query, unless webhook mode is enabled. The default query can be replaced with `JQL_ASSIGNED_TO_BOT`.
+The service polls Jira with a JQL query, unless webhook mode is enabled. `JQL_ASSIGNED_TO_BOT` can add queue filters, but polling is always scoped to `JIRA_ASSIGNEE_JQL`. By default this uses `JIRA_EMAIL`.
 
 For each matching issue, the service:
 
@@ -254,7 +270,7 @@ OPENAI_API_KEY=sk-...
 - Use `AIDER_PATH=aider` when the command is available on `PATH`.
 - Or set `AIDER_PATH` to an absolute executable path outside the project directory.
 - Project-local paths such as `./aider`, `.venv/.../aider`, or `node_modules/.bin/aider` are rejected.
-- The Docker runner image does not install Aider. If you run with `AI_PROVIDER=aider` in Docker, provide Aider from outside the project through your runtime image or host/container environment and set `AIDER_PATH` accordingly.
+- The Docker runner image installs Aider and sets `AIDER_PATH=aider`. Do not pass a host-specific Windows path into the container.
 
 ## Configuration Reference
 
@@ -267,10 +283,11 @@ OPENAI_API_KEY=sk-...
 | `JIRA_API_TOKEN` | Jira API token. |
 | `JIRA_PROJECT_KEY` | Jira project key. |
 | `JIRA_AI_BOT_DISPLAY_NAME` | Jira display name of the bot user. |
+| `JIRA_ASSIGNEE_JQL` | JQL assignee value used for polling. Defaults to `JIRA_EMAIL`. |
 | `JIRA_REPO_FIELD_ID` | Optional repository custom field ID. Auto-detected when omitted. |
 | `JIRA_CREDENTIALS_FIELD_ID` | Optional credentials custom field ID. |
 | `JIRA_BASE_URL_FIELD_ID` | Optional base URL custom field ID. |
-| `JQL_ASSIGNED_TO_BOT` | Optional JQL override. |
+| `JQL_ASSIGNED_TO_BOT` | Optional extra queue filter. |
 | `MODE` | `poll` or `webhook`. |
 | `POLL_INTERVAL_MS` | Polling interval in milliseconds. |
 | `WEBHOOK_PORT` | HTTP port for webhook mode. |

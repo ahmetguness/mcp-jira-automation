@@ -132,7 +132,7 @@ export class StateStore {
     }
 
     /** Update state after processing */
-    update(issueKey: string, status: IssueStatus, extra?: Partial<IssueState>): void {
+    update(issueKey: string, status: IssueStatus, extra?: Partial<IssueState>, options?: { immediate?: boolean }): void {
         const existing = this.get(issueKey);
         if (!existing) return;
 
@@ -144,23 +144,27 @@ export class StateStore {
             lockedAt: null, // Release lock
         };
         // Debounce non-critical updates — multiple rapid updates coalesce into one write
-        this.scheduleSave();
+        if (options?.immediate) {
+            this.saveNow();
+        } else {
+            this.scheduleSave();
+        }
         log.debug(`${issueKey} → ${status}`);
     }
 
     /** Mark as success */
     markSuccess(issueKey: string, prUrl?: string): void {
-        this.update(issueKey, "success", { prUrl: prUrl ?? null, errorMessage: null });
+        this.update(issueKey, "success", { prUrl: prUrl ?? null, errorMessage: null }, { immediate: true });
     }
 
     /** Mark as failed */
     markFailed(issueKey: string, error: string): void {
-        this.update(issueKey, "failed", { errorMessage: error });
+        this.update(issueKey, "failed", { errorMessage: error }, { immediate: true });
     }
 
     /** Mark as pending approval */
     markApprovalPending(issueKey: string): void {
-        this.update(issueKey, "approval_pending");
+        this.update(issueKey, "approval_pending", undefined, { immediate: true });
     }
 
     /** Get all issues with a specific status */

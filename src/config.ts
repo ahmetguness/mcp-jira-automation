@@ -3,6 +3,12 @@ import { createLogger } from "./logger.js";
 
 const log = createLogger("config");
 
+function optionalEnv(value: string | undefined): string | undefined {
+    const trimmed = value?.trim();
+    if (!trimmed || trimmed.startsWith("#")) return undefined;
+    return trimmed;
+}
+
 // ─── Schema ──────────────────────────────────────────────────
 
 const configSchema = z.object({
@@ -12,6 +18,7 @@ const configSchema = z.object({
     jiraApiToken: z.string().min(1, "JIRA_API_TOKEN is required"),
     jiraProjectKey: z.string().min(1, "JIRA_PROJECT_KEY is required"),
     jiraBotDisplayName: z.string().default("AI Cyber Bot"),
+    jiraAssigneeJql: z.string().default("currentUser()"),
     jiraRepoFieldId: z.string().optional(),
     jiraCredentialsFieldId: z.string().optional(),
     jiraBaseUrlFieldId: z.string().optional(),
@@ -129,10 +136,11 @@ export function loadConfig(): Config {
         jiraApiToken: process.env.JIRA_API_TOKEN ?? "",
         jiraProjectKey: process.env.JIRA_PROJECT_KEY ?? "",
         jiraBotDisplayName: process.env.JIRA_AI_BOT_DISPLAY_NAME ?? "AI Cyber Bot",
-        jiraRepoFieldId: process.env.JIRA_REPO_FIELD_ID || undefined,
-        jiraCredentialsFieldId: process.env.JIRA_CREDENTIALS_FIELD_ID || undefined,
-        jiraBaseUrlFieldId: process.env.JIRA_BASE_URL_FIELD_ID || undefined,
-        jqlOverride: process.env.JQL_ASSIGNED_TO_BOT || undefined,
+        jiraAssigneeJql: process.env.JIRA_ASSIGNEE_JQL ?? process.env.JIRA_EMAIL ?? "currentUser()",
+        jiraRepoFieldId: optionalEnv(process.env.JIRA_REPO_FIELD_ID),
+        jiraCredentialsFieldId: optionalEnv(process.env.JIRA_CREDENTIALS_FIELD_ID),
+        jiraBaseUrlFieldId: optionalEnv(process.env.JIRA_BASE_URL_FIELD_ID),
+        jqlOverride: optionalEnv(process.env.JQL_ASSIGNED_TO_BOT),
 
         // Listener
         mode: process.env.MODE ?? "poll",
@@ -245,6 +253,30 @@ export function printConfigLogs(): void {
 
 /** Build the JQL query for fetching bot-assigned issues */
 export function buildBotJql(config: Config): string {
-    if (config.jqlOverride) return config.jqlOverride;
-    return `assignee = "${config.jiraBotDisplayName}" AND statusCategory != Done AND (labels IS EMPTY OR labels != "ai-failed") ORDER BY created DESC`;
+    const queueFilter = config.jqlOverride?.trim()
+        || `statusCategory != Done AND (labels IS EMPTY OR labels != "ai-failed") ORDER BY created DESC`;
+
+    return scopeJqlToAssignee(queueFilter, config.jiraAssigneeJql ?? "currentUser()");
+}
+
+function scopeJqlToAssignee(jql: string, assigneeJql: string): string {
+    const { criteria, orderBy } = splitOrderBy(jql);
+    const assignee = assigneeJql.trim();
+    const assigneeClause = /^[a-zA-Z_][\w.]*\(\)$/.test(assignee)
+        ? assignee
+        : `"${assignee.replace(/"/g, '\\"')}"`;
+
+    return `assignee = ${assigneeClause} AND (${criteria})${orderBy ? ` ${orderBy}` : ""}`;
+}
+
+function splitOrderBy(jql: string): { criteria: string; orderBy: string } {
+    const match = jql.match(/^(.*?)(\s+ORDER\s+BY\s+[\s\S]+)$/i);
+    if (!match) {
+        return { criteria: jql.trim(), orderBy: "" };
+    }
+
+    return {
+        criteria: match[1]!.trim(),
+        orderBy: match[2]!.trim(),
+    };
 }
