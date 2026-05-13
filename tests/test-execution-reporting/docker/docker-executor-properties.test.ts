@@ -14,6 +14,24 @@ import { DefaultContainerManager } from '../../../src/test-execution-reporting/d
 import { DefaultTestFileMounter } from '../../../src/test-execution-reporting/docker/test-file-mounter.js';
 import { DefaultResultExtractor } from '../../../src/test-execution-reporting/docker/result-extractor.js';
 import type { DockerExecutionOptions } from '../../../src/test-execution-reporting/docker/types.js';
+import type { TestFramework } from '../../../src/test-execution-reporting/types.js';
+
+type FrameworkCommandAccessor = {
+  getFrameworkCommand(framework: TestFramework, testFilePath: string, projectRoot: string): string[];
+};
+
+function getFrameworkCommand(
+  executor: DockerTestExecutor,
+  framework: TestFramework,
+  testFilePath = '/test/file.test.js',
+  projectRoot = '/test'
+): string[] {
+  return (executor as unknown as FrameworkCommandAccessor).getFrameworkCommand(
+    framework,
+    testFilePath,
+    projectRoot
+  );
+}
 
 // Test configuration - use 2-3 iterations as specified
 const testConfig = { numRuns: 2 };
@@ -289,9 +307,7 @@ describe('Docker Test Executor - Property Tests', () => {
             { framework: 'node:test' as const, expectedCmd: 'node' }
           ),
           ({ framework, expectedCmd }) => {
-            // Access private method through any cast for testing
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const command = (executor as any).getFrameworkCommand(framework, '/test/file.test.js', '/test');
+            const command = getFrameworkCommand(executor, framework);
 
             // Verify command includes expected framework command
             expect(command).toContain(expectedCmd);

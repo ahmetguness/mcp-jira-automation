@@ -9,6 +9,10 @@ import { extractMcpToolResultText } from "../validation/mcp.js";
 
 const log = createLogger("mcp:manager");
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === "object";
+}
+
 /**
  * Unwraps common MCP tool return shapes into a usable JS value.
  * Handles:
@@ -18,14 +22,15 @@ const log = createLogger("mcp:manager");
  */
 function unwrapMcpResult(raw: unknown): unknown {
     // Case 1: Raw is already an object we can inspect
-    if (raw && typeof raw === "object") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const anyRaw = raw as any;
+    if (isRecord(raw)) {
+        const structuredContent = raw.structuredContent;
+        if (isRecord(structuredContent) && structuredContent.result !== undefined) {
+            return structuredContent.result;
+        }
 
-        const structured = anyRaw.structuredContent?.result;
-        if (structured !== undefined) return structured;
-
-        const text = anyRaw.content?.[0]?.text;
+        const content = raw.content;
+        const firstContent = Array.isArray(content) ? content[0] : undefined;
+        const text = isRecord(firstContent) ? firstContent.text : undefined;
         if (typeof text === "string") {
             const trimmed = text.trim();
 

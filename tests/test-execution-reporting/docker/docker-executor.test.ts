@@ -12,6 +12,24 @@ import type {
   DockerRawTestResult,
   Mount,
 } from '../../../src/test-execution-reporting/docker/types.js';
+import type { TestFramework } from '../../../src/test-execution-reporting/types.js';
+
+type FrameworkCommandAccessor = {
+  getFrameworkCommand(framework: TestFramework, testFilePath: string, projectRoot: string): string[];
+};
+
+function getFrameworkCommand(
+  executor: DockerTestExecutor,
+  framework: TestFramework,
+  testFilePath = '/test/file.test.js',
+  projectRoot = '/test'
+): string[] {
+  return (executor as unknown as FrameworkCommandAccessor).getFrameworkCommand(
+    framework,
+    testFilePath,
+    projectRoot
+  );
+}
 
 // Mock child_process
 vi.mock('child_process', () => ({
@@ -376,8 +394,7 @@ describe('DockerTestExecutor', () => {
         mockResultExtractor
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const command = (executor as any).getFrameworkCommand('jest', '/test/file.test.js', '/test');
+      const command = getFrameworkCommand(executor, 'jest');
       
       expect(command).toContain('npx');
       expect(command).toContain('jest');
@@ -391,8 +408,7 @@ describe('DockerTestExecutor', () => {
         mockResultExtractor
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const command = (executor as any).getFrameworkCommand('mocha', '/test/file.test.js', '/test');
+      const command = getFrameworkCommand(executor, 'mocha');
       
       expect(command).toContain('npx');
       expect(command).toContain('mocha');
@@ -405,8 +421,7 @@ describe('DockerTestExecutor', () => {
         mockResultExtractor
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const command = (executor as any).getFrameworkCommand('vitest', '/test/file.test.js', '/test');
+      const command = getFrameworkCommand(executor, 'vitest');
       
       expect(command).toContain('npx');
       expect(command).toContain('vitest');
@@ -420,8 +435,7 @@ describe('DockerTestExecutor', () => {
         mockResultExtractor
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const command = (executor as any).getFrameworkCommand('node:test', '/test/file.test.js', '/test');
+      const command = getFrameworkCommand(executor, 'node:test');
       
       expect(command).toContain('node');
       expect(command).toContain('--test');
@@ -434,8 +448,7 @@ describe('DockerTestExecutor', () => {
         mockResultExtractor
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const command = (executor as any).getFrameworkCommand('unknown', '/test/file.test.js', '/test');
+      const command = getFrameworkCommand(executor, 'unknown');
       
       expect(command).toContain('node');
       expect(command).toContain('--test');
